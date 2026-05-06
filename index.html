@@ -309,9 +309,9 @@
                 data[fId] = input.value || "-";
             });
 
-            const pt = (vId === 'one-percent' || vId === 'delayed' || vId === 'exempt-backdated') ? formatToAD(data.passTime) : formatToBE(data.passTime);
-            const at = (vId === 'one-percent' || vId === 'delayed' || vId === 'exempt-backdated') ? formatToAD(data.approveTime) : formatToBE(data.approveTime);
-            const idt = (vId === 'one-percent' || vId === 'delayed' || vId === 'exempt-backdated') ? formatToAD(data.invoiceDate) : formatToBE(data.invoiceDate);
+            const pt = formatToBE(data.passTime);
+	    const at = formatToBE(data.approveTime);
+            const idt = formatToBE(data.invoiceDate);
 
             const table = document.getElementById(`table-view-${vId}`);
             const yellowMsg = document.getElementById(`yellow-msg-${vId}`);
