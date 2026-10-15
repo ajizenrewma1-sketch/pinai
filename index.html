@@ -22,6 +22,19 @@
 
     <div id="toast-container" class="fixed top-24 left-1/2 -translate-x-1/2 z-[100] pointer-events-none"></div>
 
+    <!-- Modal ยืนยันคัดลอกซ้ำ -->
+    <div id="confirm-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[110] flex items-center justify-center hidden">
+        <div class="bg-white p-6 rounded-3xl shadow-2xl max-w-sm w-full mx-4 border border-slate-100">
+            <div class="w-12 h-12 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mb-4 font-bold text-xl">⚠️</div>
+            <h3 class="text-lg font-bold text-slate-800 mb-2">แจ้งเตือนการคัดลอก</h3>
+            <p id="confirm-modal-text" class="text-sm text-slate-600 font-medium mb-6"></p>
+            <div class="flex gap-3 justify-end">
+                <button id="confirm-cancel-btn" class="px-4 py-2.5 rounded-xl font-bold text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all">ยกเลิก</button>
+                <button id="confirm-ok-btn" class="px-4 py-2.5 rounded-xl font-bold text-xs bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-md shadow-blue-200">คัดลอกซ้ำ</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Main Navigation -->
     <div id="page-home" class="min-h-screen flex flex-col items-center justify-center p-6">
         <div class="max-w-4xl w-full text-center">
@@ -31,7 +44,9 @@
                 <div onclick="navigateTo('pinai-menu')" class="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 hover:shadow-xl hover:border-blue-500 transition-all cursor-pointer group relative overflow-hidden">
                     <div class="absolute top-0 right-0 w-24 h-24 bg-blue-50 rounded-bl-full -mr-8 -mt-8 group-hover:bg-blue-100 transition-colors"></div>
                     <div class="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white mb-6 shadow-lg shadow-blue-200">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+</svg>
                     </div>
                     <h2 class="text-2xl font-bold text-slate-800 mb-2">เข้าสู่เมนูพินัย</h2>
                     <p class="text-slate-500 text-sm leading-relaxed">จัดการงานพินัยแยกตามประเภทและคัดลอกข้อมูล</p>
@@ -92,30 +107,31 @@
             'trailer': { name: 'พินัยพ่วงหลัง', color: 'bg-amber-600', text: 'text-amber-600', type: 'trailer' }
         };
 
-        // ปรับปรุงฟังก์ชันจัดการคีย์บอร์ดเฉพาะตอนกด Spacebar
+        const cardCounters = {};
+        // เก็บสถานะการคัดลอก: { vId: { cardId: { smartCopy: true, yellowMsg: true, ... } } }
+        const copiedState = {};
+
         function handleInvoiceKeydown(event, input) {
             if (event.key === " ") {
-                event.preventDefault(); // ป้องกันการเว้นวรรคปกติ
+                event.preventDefault();
                 const start = input.selectionStart;
                 const end = input.selectionEnd;
                 const value = input.value;
                 
-                // ตรวจสอบว่าข้างหน้าเป็นคอมม่าอยู่แล้วหรือไม่ เพื่อป้องกันการซ้ำ
                 const beforeText = value.substring(0, start);
                 if (beforeText.trim().endsWith(",")) {
                     return;
                 }
 
-                // ใส่ " , " แทนช่องว่าง
                 input.value = value.substring(0, start) + " , " + value.substring(end);
                 
-                // เลื่อนเคอร์เซอร์ไปหลังคอมม่า
                 const newPos = start + 3;
                 input.setSelectionRange(newPos, newPos);
                 
-                // อัปเดตพรีวิว
-                const vId = input.id.split('-')[1];
-                refreshView(vId);
+                const parts = input.id.split('-');
+                const vId = parts[1];
+                const cardId = parts[2];
+                refreshView(vId, cardId);
             }
         }
 
@@ -155,18 +171,73 @@
             setTimeout(() => toast.remove(), 2000);
         }
 
-        function copyToClipboard(text, label) {
-            if (!text || text === "-") {
-                showToast("ไม่มีข้อมูลให้คัดลอก");
-                return;
-            }
+        function showConfirmModal(message, onConfirm) {
+            const modal = document.getElementById('confirm-modal');
+            const msgEl = document.getElementById('confirm-modal-text');
+            const okBtn = document.getElementById('confirm-ok-btn');
+            const cancelBtn = document.getElementById('confirm-cancel-btn');
+
+            msgEl.innerText = message;
+            modal.classList.remove('hidden');
+
+            const cleanup = () => {
+                modal.classList.add('hidden');
+                okBtn.onclick = null;
+                cancelBtn.onclick = null;
+            };
+
+            okBtn.onclick = () => {
+                cleanup();
+                onConfirm();
+            };
+
+            cancelBtn.onclick = () => {
+                cleanup();
+            };
+        }
+
+        function executeCopy(text, label, vId, cardId, copyType) {
             const el = document.createElement('textarea');
             el.value = text;
             document.body.appendChild(el);
             el.select();
             document.execCommand('copy');
             document.body.removeChild(el);
+
+            if (!copiedState[vId]) copiedState[vId] = {};
+            if (!copiedState[vId][cardId]) copiedState[vId][cardId] = {};
+            copiedState[vId][cardId][copyType] = true;
+
+            updateCopiedUI(vId, cardId);
             showToast("คัดลอก: " + label);
+        }
+
+        function handleCopy(text, label, vId, cardId, copyType) {
+            if (!text || text === "-") {
+                showToast("ไม่มีข้อมูลให้คัดลอก");
+                return;
+            }
+
+            if (copiedState[vId]?.[cardId]?.[copyType]) {
+                showConfirmModal(`คุณคัดลอกข้อมูล${label}ของรายการนี้ไปแล้ว ต้องการคัดลอกซ้ำหรือไม่?`, () => {
+                    executeCopy(text, label, vId, cardId, copyType);
+                });
+            } else {
+                executeCopy(text, label, vId, cardId, copyType);
+            }
+        }
+
+        function updateCopiedUI(vId, cardId) {
+            const state = copiedState[vId]?.[cardId] || {};
+            const hasAnyCopied = Object.values(state).some(val => val === true);
+            
+            const badge = document.getElementById(`copied-badge-${vId}-${cardId}`);
+            if (badge) {
+                if (hasAnyCopied) badge.classList.remove('hidden');
+                else badge.classList.add('hidden');
+            }
+
+            refreshView(vId, cardId);
         }
 
         function setupWorkPages() {
@@ -186,36 +257,91 @@
                             <div class="w-6 h-6 ${config.color} rounded flex items-center justify-center text-white text-[10px] font-bold">${config.name.charAt(0)}</div>
                             <span class="font-extrabold text-slate-700 uppercase tracking-tight">${config.name}</span>
                         </div>
-                        <button onclick="resetInputs('${vId}')" class="text-rose-500 hover:bg-rose-50 px-3 py-1 rounded-lg text-xs font-bold transition-all border border-transparent hover:border-rose-100">ล้าง</button>
-                    </div>
-                    <div class="max-w-5xl mx-auto w-full p-6">
-                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                            <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 h-fit">
-                                <h3 class="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2"><span class="w-2 h-6 ${config.color} rounded-full"></span> ฟอร์มข้อมูล</h3>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="fields-${vId}"></div>
-                            </div>
-                            <div class="flex flex-col gap-4">
-                                <div class="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-200 relative overflow-hidden" id="pdf-content-${vId}">
-                                    <div class="absolute top-0 left-0 w-full h-2 ${config.color}"></div>
-                                    <h4 class="${config.text} font-black text-2xl tracking-tight mb-6">${config.name}</h4>
-                                    <table class="table-custom" id="table-view-${vId}"></table>
-                                    <div class="mt-4 p-4 bg-yellow-50 border-2 border-dashed border-yellow-400 rounded-2xl text-[13px] font-bold text-slate-700" id="yellow-msg-${vId}"></div>
-                                    <div class="mt-8 grid grid-cols-1 gap-2" id="copy-buttons-${vId}">
-                                    </div>
-                                </div>
-                            </div>
+                        <div class="flex items-center gap-2">
+                            <button onclick="addNewCard('${vId}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg text-xs font-bold transition-all">+ เพิ่มรายการ</button>
+                            <button onclick="resetInputs('${vId}')" class="text-rose-500 hover:bg-rose-50 px-3 py-1 rounded-lg text-xs font-bold transition-all border border-transparent hover:border-rose-100">ล้างทั้งหมด</button>
                         </div>
+                    </div>
+                    <div class="max-w-6xl mx-auto w-full p-6">
+                        <div id="cards-container-${vId}" class="flex flex-col gap-8"></div>
                     </div>
                 `;
                 container.appendChild(section);
-                renderFields(vId);
-                refreshView(vId);
+                addNewCard(vId);
             });
         }
 
-        function renderFields(vId) {
+        function renumberCards(vId) {
+            const cards = document.querySelectorAll(`[id^="card-item-${vId}-"]`);
+            cards.forEach((card, index) => {
+                const titleSpan = card.querySelector('.card-title');
+                if (titleSpan) {
+                    titleSpan.innerText = `รายการที่ ${index + 1}`;
+                }
+            });
+        }
+
+        function addNewCard(vId) {
+            if (!cardCounters[vId]) cardCounters[vId] = 0;
+            cardCounters[vId]++;
+            const cardId = cardCounters[vId];
             const config = versionConfigs[vId];
-            const fieldsContainer = document.getElementById(`fields-${vId}`);
+            
+            const container = document.getElementById(`cards-container-${vId}`);
+            const cardItem = document.createElement('div');
+            cardItem.id = `card-item-${vId}-${cardId}`;
+            cardItem.className = 'bg-slate-100/60 p-6 rounded-3xl border border-slate-200 relative';
+            cardItem.innerHTML = `
+                <div class="flex justify-between items-center mb-4 pb-2 border-b border-slate-200">
+                    <div class="flex items-center gap-3">
+                        <span class="card-title font-extrabold text-slate-700 text-sm">รายการที่ 1</span>
+                        <span id="copied-badge-${vId}-${cardId}" class="hidden bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] px-2.5 py-0.5 rounded-full font-extrabold flex items-center gap-1">
+                            ✓ คัดลอกแล้ว
+                        </span>
+                    </div>
+                    <button onclick="removeCard('${vId}', ${cardId})" class="text-rose-500 hover:bg-rose-100 px-2 py-1 rounded-lg text-xs font-bold transition-all">✕ ลบรายการนี้</button>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 h-fit">
+                        <h3 class="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2"><span class="w-2 h-6 ${config.color} rounded-full"></span> ฟอร์มข้อมูล</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="fields-${vId}-${cardId}"></div>
+                    </div>
+                    <div class="flex flex-col gap-4">
+                        <div class="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-200 relative overflow-hidden" id="pdf-content-${vId}-${cardId}">
+                            <div class="absolute top-0 left-0 w-full h-2 ${config.color}"></div>
+                            <h4 class="${config.text} font-black text-2xl tracking-tight mb-6">${config.name}</h4>
+                            <table class="table-custom" id="table-view-${vId}-${cardId}"></table>
+                            <div class="mt-4 p-4 bg-yellow-50 border-2 border-dashed border-yellow-400 rounded-2xl text-[13px] font-bold text-slate-700" id="yellow-msg-${vId}-${cardId}"></div>
+                            <div class="mt-8 grid grid-cols-1 gap-2" id="copy-buttons-${vId}-${cardId}"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.appendChild(cardItem);
+            
+            renderFields(vId, cardId);
+            refreshView(vId, cardId);
+            renumberCards(vId);
+        }
+
+        function removeCard(vId, cardId) {
+            const card = document.getElementById(`card-item-${vId}-${cardId}`);
+            if (card) {
+                const totalCards = document.querySelectorAll(`[id^="card-item-${vId}-"]`).length;
+                if (totalCards <= 1) {
+                    showToast("ต้องมีอย่างน้อย 1 รายการ");
+                    return;
+                }
+                card.remove();
+                delete copiedState[vId]?.[cardId];
+                renumberCards(vId);
+                showToast("ลบรายการแล้ว");
+            }
+        }
+
+        function renderFields(vId, cardId) {
+            const config = versionConfigs[vId];
+            const fieldsContainer = document.getElementById(`fields-${vId}-${cardId}`);
             let fields = [];
             
             const baseFieldsTop = [
@@ -268,55 +394,56 @@
             fieldsContainer.innerHTML = fields.map(f => {
                 const isInvoiceField = f.id === 'invoiceNo';
                 const inputAttrs = isInvoiceField 
-                    ? `onkeydown="handleInvoiceKeydown(event, this)" oninput="refreshView('${vId}')"` 
-                    : `oninput="refreshView('${vId}')"`;
+                    ? `onkeydown="handleInvoiceKeydown(event, this)" oninput="refreshView('${vId}', '${cardId}')"` 
+                    : `oninput="refreshView('${vId}', '${cardId}')"`;
 
                 return `
-                <div id="wrapper-${vId}-${f.id}" class="flex flex-col gap-1 ${f.span ? 'md:col-span-2' : ''} ${f.isHidden ? 'hidden' : ''}">
+                <div id="wrapper-${vId}-${cardId}-${f.id}" class="flex flex-col gap-1 ${f.span ? 'md:col-span-2' : ''} ${f.isHidden ? 'hidden' : ''}">
                     <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">${f.label}</label>
                     ${f.type === 'select' ? 
-                        `<select id="input-${vId}-${f.id}" onchange="onSelectChange('${vId}', '${f.id}')" class="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-slate-50 focus:bg-white focus:ring-2 ring-blue-100 outline-none transition-all font-bold cursor-pointer">
-                            <option value="">เลือก${f.label}</option>
-                            ${f.options.map(o => `<option value="${o}">${o}</option>`).join('')}
+                        `<select id="input-${vId}-${cardId}-${f.id}" onchange="onSelectChange('${vId}', '${cardId}', '${f.id}')" class="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-slate-50 focus:bg-white focus:ring-2 ring-blue-100 outline-none transition-all font-bold cursor-pointer">
+                            <option value="">เลือก${f.label}</option>${f.options.map(o => `<option value="${o}">${o}</option>`).join('')}
                         </select>` :
                         f.id === 'otherReason' || f.id === 'note' ?
-                        `<textarea id="input-${vId}-${f.id}" oninput="refreshView('${vId}')" placeholder="${f.placeholder}" class="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-slate-50 focus:bg-white focus:ring-2 ring-blue-100 outline-none transition-all font-bold h-24">${vId === 'exempt-backdated' && f.id === 'note' ? 'เป็นรายการผ่านทาง (ที่มีหนังสือยกเว้น)' : ''}</textarea>` :
-                        `<input id="input-${vId}-${f.id}" ${inputAttrs} placeholder="${f.placeholder}" class="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-slate-50 focus:bg-white focus:ring-2 ring-blue-100 outline-none transition-all font-bold" />`
+                        `<textarea id="input-${vId}-${cardId}-${f.id}" oninput="refreshView('${vId}', '${cardId}')" placeholder="${f.placeholder}" class="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-slate-50 focus:bg-white focus:ring-2 ring-blue-100 outline-none transition-all font-bold h-24">${vId === 'exempt-backdated' && f.id === 'note' ? 'เป็นรายการผ่านทาง (ที่มีหนังสือยกเว้น)' : ''}</textarea>` :
+                        `<input id="input-${vId}-${cardId}-${f.id}" ${inputAttrs} placeholder="${f.placeholder}" class="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-slate-50 focus:bg-white focus:ring-2 ring-blue-100 outline-none transition-all font-bold" />`
                     }
                 </div>`;
             }).join('');
         }
 
-        function onSelectChange(vId, fId) {
+        function onSelectChange(vId, cardId, fId) {
             if (vId === 'one-percent' && fId === 'complaintType') {
-                const val = document.getElementById(`input-${vId}-${fId}`).value;
-                const wrapper = document.getElementById(`wrapper-${vId}-otherReason`);
+                const val = document.getElementById(`input-${vId}-${cardId}-${fId}`).value;
+                const wrapper = document.getElementById(`wrapper-${vId}-${cardId}-otherReason`);
                 if (val === 'อื่นๆ') {
                     wrapper.classList.remove('hidden');
                 } else {
                     wrapper.classList.add('hidden');
-                    document.getElementById(`input-${vId}-otherReason`).value = "";
+                    document.getElementById(`input-${vId}-${cardId}-otherReason`).value = "";
                 }
             }
-            refreshView(vId);
+            refreshView(vId, cardId);
         }
 
-        function refreshView(vId) {
+        function refreshView(vId, cardId) {
             const config = versionConfigs[vId];
             const data = {};
-            document.querySelectorAll(`[id^="input-${vId}-"]`).forEach(input => {
-                const fId = input.id.replace(`input-${vId}-`, '');
+            document.querySelectorAll(`[id^="input-${vId}-${cardId}-"]`).forEach(input => {
+                const fId = input.id.replace(`input-${vId}-${cardId}-`, '');
                 data[fId] = input.value || "-";
             });
 
             const pt = formatToBE(data.passTime);
-	    const at = formatToBE(data.approveTime);
+            const at = formatToBE(data.approveTime);
             const idt = formatToBE(data.invoiceDate);
 
-            const table = document.getElementById(`table-view-${vId}`);
-            const yellowMsg = document.getElementById(`yellow-msg-${vId}`);
+            const table = document.getElementById(`table-view-${vId}-${cardId}`);
+            const yellowMsg = document.getElementById(`yellow-msg-${vId}-${cardId}`);
             let rows = [];
             let extraButtons = "";
+
+            const isCopied = (type) => copiedState[vId]?.[cardId]?.[type];
 
             if (vId === 'one-percent') {
                 rows = [
@@ -333,7 +460,7 @@
                 ];
 
                 if (data.complaintType === 'ไม่ทราบว่าเป็นระบบ M-Flow') {
-                    yellowMsg.innerText = "ข้าพเจ้าได้รับหนังสือค่าปรับจากทาง M-Flow โดยแจ้งว่าหลีกเลี่ยงชำระค่าผ่านทาง แต่ข้าพเจ้ายืนยันว่าไม่ได้มีเจตนาหลีกเลี่ยง เนื่องจากข้าพเจ้าไม่ทราบว่าเป็นระบบ M-Flow เเละไม่ได้รับการเเจ้งเตือนแต่อย่างใด ข้าพเจ้ารู้สึกไม่ได้รับความเป็นธรรม ยินดีชำระค่าผ่านทางตามจริง";
+                    yellowMsg.innerText = "ข้าพเจ้าได้รับหนังสือค่าปรับจากทาง M-Flow โดยแจ้งว่าหลีกเลี่ยงชำระค่าผ่านทาง แต่ข้าพเจ้ายืนยันว่าไม่ได้มีเจตนาหลีกเลี่ยง เนื่องจากข้าพเจ้าไม่ทราบว่าเป็นระบบ M-Flow เเละไม่ได้รับการเเจ้งเตือนแ่อย่างใด ข้าพเจ้ารู้สึกไม่ได้รับความเป็นธรรม ยินดีชำระค่าผ่านทางตามจริง";
                 } else if (data.complaintType === 'ระบบไม่แสดงยอดชำระ') {
                     yellowMsg.innerText = "ข้าพเจ้าได้รับหนังสือค่าปรับจากทาง M-Flow โดยแจ้งว่าหลีกเลี่ยงชำระค่าผ่านทาง แต่ข้าพเจ้ายืนยันว่าได้เข้ามาค้นหายอดเเล้วเเต่ระบบไม่เเสดงยอดให้ชำระเงิน ไม่ได้มีเจตนาหลีกเลี่ยง ข้าพเจ้ารู้สึกไม่ได้รับความเป็นธรรมที่ต้องชำระพร้อมค่าปรับ จึงขอพิจารณาค่าปรับ ยินดีชำระค่าผ่านทางตามจริง";
                 } else if (data.complaintType === 'อื่นๆ') {
@@ -345,13 +472,13 @@
                 let classDesc = "-";
                 let rejectReason = "กรุณาเลือกคลาสรถที่วิ่งใช้ทางจริง";
 
-                if (data.correctPlate.includes("C1")) {
+                if (data.correctPlate && data.correctPlate.includes("C1")) {
                     classDesc = "4 ล้อ (C1)";
                     rejectReason = "ระบบคิดรายการค่าผ่านทางไม่ถูกต้อง และ Class รถไม่ถูกต้อง ราคาที่ถูกต้อง คือ 30 บาท Class รถ C1 = 4 ล้อ";
-                } else if (data.correctPlate.includes("C2")) {
+                } else if (data.correctPlate && data.correctPlate.includes("C2")) {
                     classDesc = "6 ล้อ (C2)";
                     rejectReason = "ระบบคิดรายการค่าผ่านทางไม่ถูกต้อง และ Class รถไม่ถูกต้อง ราคาที่ถูกต้อง คือ 50 บาท Class รถ C2 = 6 ล้อ";
-                } else if (data.correctPlate.includes("C3")) {
+                } else if (data.correctPlate && data.correctPlate.includes("C3")) {
                     classDesc = "มากกว่า 6 ล้อ (C3)";
                     rejectReason = "ระบบคิดรายการค่าผ่านทางไม่ถูกต้อง และ Class รถไม่ถูกต้อง ราคาที่ถูกต้อง คือ 70 บาท Class รถ C3 = มากกว่า 6 ล้อ";
                 }
@@ -384,10 +511,18 @@
                     ["หมายเหตุ", data.note]
                 ];
                 yellowMsg.innerText = `ขอปฏิเสธการโต้แย้ง เนื่องจากรถทะเบียน ${data.plateTrailer} ซึ่งเป็นส่วนพ่วงหลัง ได้ผ่านทางเมื่อวันที่ ${pt} จริง`;
+                
+                const btnFrontClass = isCopied('plateFront') ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100';
+                const btnTrailerClass = isCopied('plateTrailer') ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100';
+
                 extraButtons = `
                     <div class="grid grid-cols-2 gap-2 mb-2">
-                        <button onclick="copyToClipboard('${data.plateFront}', 'ทะเบียนส่วนหน้า')" class="bg-indigo-50 text-indigo-700 border border-indigo-200 p-2 rounded-xl font-bold text-xs hover:bg-indigo-100 uppercase transition-all">คัดลอกทะเบียนหน้า</button>
-                        <button onclick="copyToClipboard('${data.plateTrailer}', 'ทะเบียนส่วนพ่วง')" class="bg-amber-50 text-amber-700 border border-amber-200 p-2 rounded-xl font-bold text-xs hover:bg-amber-100 uppercase transition-all">คัดลอกทะเบียนพ่วง</button>
+                        <button onclick="copyPlateFront('${vId}', '${cardId}')" class="${btnFrontClass} border p-2 rounded-xl font-bold text-xs uppercase transition-all">
+                            ${isCopied('plateFront') ? '✓ ' : ''}คัดลอกทะเบียนหน้า
+                        </button>
+                        <button onclick="copyPlateTrailer('${vId}', '${cardId}')" class="${btnTrailerClass} border p-2 rounded-xl font-bold text-xs uppercase transition-all">
+                            ${isCopied('plateTrailer') ? '✓ ' : ''}คัดลอกทะเบียนพ่วง
+                        </button>
                     </div>
                 `;
             } else if (config.type === 'special-1percent') {
@@ -419,26 +554,60 @@
                 ];
                 yellowMsg.innerText = `ข้าพเจ้าขอปฏิเสธรายการผ่านทางของทะเบียน ${data.plateWrong} เนื่องจากไม่ได้ผ่านทางในวันที่ ${pt}`;
                 
+                const btnWrongClass = isCopied('plateWrong') ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100';
+                const btnRightClass = isCopied('plateRight') ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100';
+
                 extraButtons = `
                     <div class="grid grid-cols-2 gap-2 mb-2">
-                        <button onclick="copyToClipboard('${data.plateWrong}', 'ทะเบียนผิด')" class="bg-rose-50 text-rose-700 border border-rose-200 p-2 rounded-xl font-bold text-xs hover:bg-rose-100 transition-colors uppercase">คัดลอกทะเบียนผิด</button>
-                        <button onclick="copyToClipboard('${data.plateRight}', 'ทะเบียนถูก')" class="bg-emerald-50 text-emerald-700 border border-emerald-200 p-2 rounded-xl font-bold text-xs hover:bg-emerald-100 transition-colors uppercase">คัดลอกทะเบียนถูก</button>
+                        <button onclick="copyPlateWrong('${vId}', '${cardId}')" class="${btnWrongClass} border p-2 rounded-xl font-bold text-xs uppercase transition-all">
+                            ${isCopied('plateWrong') ? '✓ ' : ''}คัดลอกทะเบียนผิด
+                        </button>
+                        <button onclick="copyPlateRight('${vId}', '${cardId}')" class="${btnRightClass} border p-2 rounded-xl font-bold text-xs uppercase transition-all">
+                            ${isCopied('plateRight') ? '✓ ' : ''}คัดลอกทะเบียนถูก
+                        </button>
                     </div>
                 `;
             }
 
             table.innerHTML = rows.map(r => `<tr><td class="td-label">${r[0]}</td><td><div style="white-space: pre-wrap;">${r[1]}</div></td></tr>`).join('');
             
-            const btnContainer = document.getElementById(`copy-buttons-${vId}`);
+            const btnSmartClass = isCopied('smartCopy') ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-900 hover:bg-slate-800';
+            const btnYellowClass = isCopied('yellowMsg') ? 'bg-emerald-500 hover:bg-emerald-600 text-white' : 'bg-yellow-400 hover:bg-yellow-500 text-slate-900';
+
+            const btnContainer = document.getElementById(`copy-buttons-${vId}-${cardId}`);
             btnContainer.innerHTML = `
                 ${extraButtons}
-                <button onclick="copySmartTableData('${vId}')" class="bg-slate-900 text-white p-3 rounded-2xl font-bold text-xs hover:bg-slate-800 active:scale-95 transition-all w-full">📋 คัดลอกข้อมูลตาราง (Smart Copy)</button>
-                <button onclick="copyYellowMsg('${vId}')" class="bg-yellow-400 text-slate-900 p-3 rounded-2xl font-bold text-xs hover:bg-yellow-500 active:scale-95 transition-all w-full mt-2">คัดลอกข้อความปฏิเสธ</button>
+                <button onclick="copySmartTableData('${vId}', '${cardId}')" class="${btnSmartClass} text-white p-3 rounded-2xl font-bold text-xs active:scale-95 transition-all w-full">
+                    ${isCopied('smartCopy') ? '✓ ' : '📋 '}คัดลอกข้อมูลตาราง (Smart Copy)
+                </button>
+                <button onclick="copyYellowMsg('${vId}', '${cardId}')" class="${btnYellowClass} p-3 rounded-2xl font-bold text-xs active:scale-95 transition-all w-full mt-2">
+                    ${isCopied('yellowMsg') ? '✓ ' : ''}คัดลอกข้อความปฏิเสธ
+                </button>
             `;
         }
 
-        function copySmartTableData(vId) {
-            const table = document.getElementById(`table-view-${vId}`);
+        function copyPlateFront(vId, cardId) {
+            const val = document.getElementById(`input-${vId}-${cardId}-plateFront`)?.value;
+            handleCopy(val, "ทะเบียนส่วนหน้า", vId, cardId, 'plateFront');
+        }
+
+        function copyPlateTrailer(vId, cardId) {
+            const val = document.getElementById(`input-${vId}-${cardId}-plateTrailer`)?.value;
+            handleCopy(val, "ทะเบียนส่วนพ่วง", vId, cardId, 'plateTrailer');
+        }
+
+        function copyPlateWrong(vId, cardId) {
+            const val = document.getElementById(`input-${vId}-${cardId}-plateWrong`)?.value;
+            handleCopy(val, "ทะเบียนผิด", vId, cardId, 'plateWrong');
+        }
+
+        function copyPlateRight(vId, cardId) {
+            const val = document.getElementById(`input-${vId}-${cardId}-plateRight`)?.value;
+            handleCopy(val, "ทะเบียนถูก", vId, cardId, 'plateRight');
+        }
+
+        function copySmartTableData(vId, cardId) {
+            const table = document.getElementById(`table-view-${vId}-${cardId}`);
             const rows = Array.from(table.querySelectorAll('tr'));
             let collectedValues = [];
 
@@ -456,17 +625,20 @@
                 });
             }
 
-            if (collectedValues.length > 0) copyToClipboard(collectedValues.join("\n"), "ข้อมูลตาราง");
-            else showToast("ไม่พบข้อมูล");
+            if (collectedValues.length > 0) {
+                handleCopy(collectedValues.join("\n"), "ข้อมูลตาราง", vId, cardId, 'smartCopy');
+            } else {
+                showToast("ไม่พบข้อมูล");
+            }
         }
 
-        function copyYellowMsg(vId) {
-            const msg = document.getElementById(`yellow-msg-${vId}`).innerText;
+        function copyYellowMsg(vId, cardId) {
+            const msg = document.getElementById(`yellow-msg-${vId}-${cardId}`).innerText;
             if (msg.includes("กรุณาเลือก")) {
                 showToast("กรุณาเลือกข้อมูลให้ครบก่อน");
                 return;
             }
-            copyToClipboard(msg, "ข้อความปฏิเสธ");
+            handleCopy(msg, "ข้อความปฏิเสธ", vId, cardId, 'yellowMsg');
         }
 
         function resetInputs(vId) {
@@ -476,9 +648,17 @@
                     input.value = "เป็นรายการผ่านทาง (ที่มีหนังสือยกเว้น)";
                 }
             });
-            const otherWrapper = document.getElementById(`wrapper-${vId}-otherReason`);
-            if (otherWrapper) otherWrapper.classList.add('hidden');
-            refreshView(vId);
+            document.querySelectorAll(`[id^="wrapper-${vId}-"][id$="-otherReason"]`).forEach(wrapper => {
+                wrapper.classList.add('hidden');
+            });
+            
+            // เคลียร์สถานะคัดลอกทั้งหมดในเมนูนั้น
+            delete copiedState[vId];
+
+            document.querySelectorAll(`[id^="card-item-${vId}-"]`).forEach(card => {
+                const cardId = card.id.replace(`card-item-${vId}-`, '');
+                updateCopiedUI(vId, cardId);
+            });
             showToast("ล้างข้อมูลแล้ว");
         }
 
