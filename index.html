@@ -22,7 +22,7 @@
 
     <div id="toast-container" class="fixed top-24 left-1/2 -translate-x-1/2 z-[100] pointer-events-none"></div>
 
-    <!-- Modal ยืนยันคัดลอกซ้ำ -->
+    <!-- Modal ยืนยันคัดลอกซ้ำ / คัดลอกข้าม -->
     <div id="confirm-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[110] flex items-center justify-center hidden">
         <div class="bg-white p-6 rounded-3xl shadow-2xl max-w-sm w-full mx-4 border border-slate-100">
             <div class="w-12 h-12 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mb-4 font-bold text-xl">⚠️</div>
@@ -30,7 +30,7 @@
             <p id="confirm-modal-text" class="text-sm text-slate-600 font-medium mb-6"></p>
             <div class="flex gap-3 justify-end">
                 <button id="confirm-cancel-btn" class="px-4 py-2.5 rounded-xl font-bold text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all">ยกเลิก</button>
-                <button id="confirm-ok-btn" class="px-4 py-2.5 rounded-xl font-bold text-xs bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-md shadow-blue-200">คัดลอกซ้ำ</button>
+                <button id="confirm-ok-btn" class="px-4 py-2.5 rounded-xl font-bold text-xs bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-md shadow-blue-200">ตกลง</button>
             </div>
         </div>
     </div>
@@ -44,9 +44,9 @@
                 <div onclick="navigateTo('pinai-menu')" class="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 hover:shadow-xl hover:border-blue-500 transition-all cursor-pointer group relative overflow-hidden">
                     <div class="absolute top-0 right-0 w-24 h-24 bg-blue-50 rounded-bl-full -mr-8 -mt-8 group-hover:bg-blue-100 transition-colors"></div>
                     <div class="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white mb-6 shadow-lg shadow-blue-200">
-<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-</svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
                     </div>
                     <h2 class="text-2xl font-bold text-slate-800 mb-2">เข้าสู่เมนูพินัย</h2>
                     <p class="text-slate-500 text-sm leading-relaxed">จัดการงานพินัยแยกตามประเภทและคัดลอกข้อมูล</p>
@@ -108,7 +108,6 @@
         };
 
         const cardCounters = {};
-        // เก็บสถานะการคัดลอก: { vId: { cardId: { smartCopy: true, yellowMsg: true, ... } } }
         const copiedState = {};
 
         function handleInvoiceKeydown(event, input) {
@@ -171,13 +170,16 @@
             setTimeout(() => toast.remove(), 2000);
         }
 
-        function showConfirmModal(message, onConfirm) {
+        function showConfirmModal(message, okText, cancelText, onOk, onCancel) {
             const modal = document.getElementById('confirm-modal');
             const msgEl = document.getElementById('confirm-modal-text');
             const okBtn = document.getElementById('confirm-ok-btn');
             const cancelBtn = document.getElementById('confirm-cancel-btn');
 
             msgEl.innerText = message;
+            okBtn.innerText = okText || "ตกลง";
+            cancelBtn.innerText = cancelText || "ยกเลิก";
+
             modal.classList.remove('hidden');
 
             const cleanup = () => {
@@ -188,11 +190,12 @@
 
             okBtn.onclick = () => {
                 cleanup();
-                onConfirm();
+                if (onOk) onOk();
             };
 
             cancelBtn.onclick = () => {
                 cleanup();
+                if (onCancel) onCancel();
             };
         }
 
@@ -218,12 +221,54 @@
                 return;
             }
 
-            if (copiedState[vId]?.[cardId]?.[copyType]) {
-                showConfirmModal(`คุณคัดลอกข้อมูล${label}ของรายการนี้ไปแล้ว ต้องการคัดลอกซ้ำหรือไม่?`, () => {
+            // 1. ตรวจสอบการข้ามรายการ
+            const cards = Array.from(document.querySelectorAll(`[id^="card-item-${vId}-"]`));
+            const currentIndex = cards.findIndex(c => c.id === `card-item-${vId}-${cardId}`);
+            let uncopiedIndex = -1;
+
+            for (let i = 0; i < currentIndex; i++) {
+                const prevCardId = cards[i].id.replace(`card-item-${vId}-`, '');
+                const state = copiedState[vId]?.[prevCardId] || {};
+                const hasCopied = Object.values(state).some(val => val === true);
+                if (!hasCopied) {
+                    uncopiedIndex = i + 1; // ลำดับรายการจริง (1-based)
+                    break;
+                }
+            }
+
+            if (uncopiedIndex !== -1) {
+                showConfirmModal(
+                    `คุณข้ามการคัดลอกข้อมูล รายการที่ ${uncopiedIndex} ต้องการกลับไปคัดลอกรายการที่ ${uncopiedIndex} ก่อนหรือไม่?`,
+                    "ตกลง (ไม่คัดลอก)",
+                    "ยกเลิก (คัดลอกต่อ)",
+                    () => {
+                        // กดยืนยัน (ตกลง): ไม่ทำการคัดลอก
+                    },
+                    () => {
+                        // กดยกเลิก: ดำเนินการคัดลอกต่อ
+                        proceedCopyCheck();
+                    }
+                );
+                return;
+            }
+
+            proceedCopyCheck();
+
+            function proceedCopyCheck() {
+                // 2. ตรวจสอบการคัดลอกซ้ำในรายการเดิม
+                if (copiedState[vId]?.[cardId]?.[copyType]) {
+                    showConfirmModal(
+                        `คุณคัดลอกข้อมูล${label}ของรายการนี้ไปแล้ว ต้องการคัดลอกซ้ำหรือไม่?`,
+                        "คัดลอกซ้ำ",
+                        "ยกเลิก",
+                        () => {
+                            executeCopy(text, label, vId, cardId, copyType);
+                        },
+                        null
+                    );
+                } else {
                     executeCopy(text, label, vId, cardId, copyType);
-                });
-            } else {
-                executeCopy(text, label, vId, cardId, copyType);
+                }
             }
         }
 
@@ -258,8 +303,9 @@
                             <span class="font-extrabold text-slate-700 uppercase tracking-tight">${config.name}</span>
                         </div>
                         <div class="flex items-center gap-2">
-                            <button onclick="addNewCard('${vId}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg text-xs font-bold transition-all">+ เพิ่มรายการ</button>
-                            <button onclick="resetInputs('${vId}')" class="text-rose-500 hover:bg-rose-50 px-3 py-1 rounded-lg text-xs font-bold transition-all border border-transparent hover:border-rose-100">ล้างทั้งหมด</button>
+                            <button onclick="sortAndGroupCards('${vId}')" class="bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm">🔀 จัดกลุ่มและเรียงลำดับ</button>
+                            <button onclick="addNewCard('${vId}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all">+ เพิ่มรายการ</button>
+                            <button onclick="resetInputs('${vId}')" class="text-rose-500 hover:bg-rose-50 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border border-transparent hover:border-rose-100">ล้างทั้งหมด</button>
                         </div>
                     </div>
                     <div class="max-w-6xl mx-auto w-full p-6">
@@ -279,6 +325,54 @@
                     titleSpan.innerText = `รายการที่ ${index + 1}`;
                 }
             });
+        }
+
+        function sortAndGroupCards(vId) {
+            const container = document.getElementById(`cards-container-${vId}`);
+            const cards = Array.from(container.querySelectorAll(`[id^="card-item-${vId}-"]`));
+
+            if (cards.length <= 1) {
+                showToast("มีรายการไม่เพียงพอสำหรับการเรียงลำดับ");
+                return;
+            }
+
+            // รวบรวมข้อมูลจากการ์ดแต่ละใบ
+            const cardsData = cards.map(card => {
+                const cardId = card.id.replace(`card-item-${vId}-`, '');
+                const inputs = card.querySelectorAll(`[id^="input-${vId}-${cardId}-"]`);
+                const inputValues = {};
+                inputs.forEach(inp => {
+                    const fieldName = inp.id.replace(`input-${vId}-${cardId}-`, '');
+                    inputValues[fieldName] = inp.value;
+                });
+
+                // ดึงค่าทะเบียนหลักสำหรับการจัดกลุ่ม
+                let plate = inputValues.plate || inputValues.plateWrong || inputValues.plateTrailer || inputValues.plateFront || "";
+                let passTime = inputValues.passTime || "";
+
+                return {
+                    cardElement: card,
+                    cardId: cardId,
+                    plate: plate.trim().toLowerCase(),
+                    passTime: passTime.trim(),
+                    inputValues: inputValues
+                };
+            });
+
+            // เรียงลำดับ: 1. กลุ่มทะเบียนเหมือนกัน 2. เรียงตาม วัน-เวลา ผ่านทาง (A-Z)
+            cardsData.sort((a, b) => {
+                if (a.plate < b.plate) return -1;
+                if (a.plate > b.plate) return 1;
+                return a.passTime.localeCompare(b.passTime, 'th', { numeric: true });
+            });
+
+            // จัดเรียง Element ใน DOM ใหม่
+            cardsData.forEach(item => {
+                container.appendChild(item.cardElement);
+            });
+
+            renumberCards(vId);
+            showToast("จัดกลุ่มและเรียงลำดับเรียบร้อยแล้ว");
         }
 
         function addNewCard(vId) {
@@ -642,23 +736,19 @@
         }
 
         function resetInputs(vId) {
-            document.querySelectorAll(`[id^="input-${vId}-"]`).forEach(input => {
-                input.value = "";
-                if (vId === 'exempt-backdated' && input.id.includes('note')) {
-                    input.value = "เป็นรายการผ่านทาง (ที่มีหนังสือยกเว้น)";
-                }
-            });
-            document.querySelectorAll(`[id^="wrapper-${vId}-"][id$="-otherReason"]`).forEach(wrapper => {
-                wrapper.classList.add('hidden');
-            });
-            
-            // เคลียร์สถานะคัดลอกทั้งหมดในเมนูนั้น
-            delete copiedState[vId];
+            // 1. เคลียร์การ์ดเดิมใน container ออกทั้งหมด
+            const container = document.getElementById(`cards-container-${vId}`);
+            if (container) {
+                container.innerHTML = '';
+            }
 
-            document.querySelectorAll(`[id^="card-item-${vId}-"]`).forEach(card => {
-                const cardId = card.id.replace(`card-item-${vId}-`, '');
-                updateCopiedUI(vId, cardId);
-            });
+            // 2. ล้างสถานะการคัดลอก และรีเซ็ตตัวนับลำดับการ์ด
+            delete copiedState[vId];
+            cardCounters[vId] = 0;
+
+            // 3. สร้างการ์ดใหม่ขึ้นมาแค่ 1 การ์ด (ว่างเปล่า)
+            addNewCard(vId);
+
             showToast("ล้างข้อมูลแล้ว");
         }
 
