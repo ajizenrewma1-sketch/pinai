@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pinai Application (Unified Premium)</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- ใช้ไลบรารี ExcelJS เพื่อรักษารูปแบบ ฟอนต์ และเส้นขอบเดิม 100% -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Sarabun', sans-serif; background-color: #f8fafc; }
@@ -45,7 +47,7 @@
                     <div class="absolute top-0 right-0 w-24 h-24 bg-blue-50 rounded-bl-full -mr-8 -mt-8 group-hover:bg-blue-100 transition-colors"></div>
                     <div class="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white mb-6 shadow-lg shadow-blue-200">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                         </svg>
                     </div>
                     <h2 class="text-2xl font-bold text-slate-800 mb-2">เข้าสู่เมนูพินัย</h2>
@@ -107,8 +109,22 @@
             'trailer': { name: 'พินัยพ่วงหลัง', color: 'bg-amber-600', text: 'text-amber-600', type: 'trailer' }
         };
 
-        const cardCounters = {};
-        const copiedState = {};
+        // ชุดโทนสีสำหรับจัดกลุ่มแยกกันให้ชัดเจน
+        const groupThemes = [
+            { bg: 'bg-sky-50/80', border: 'border-sky-300', headerBg: 'bg-sky-100/90', headerBorder: 'border-sky-200', dot: 'bg-sky-600', plateText: 'text-sky-700' },
+            { bg: 'bg-indigo-50/80', border: 'border-indigo-300', headerBg: 'bg-indigo-100/90', headerBorder: 'border-indigo-200', dot: 'bg-indigo-600', plateText: 'text-indigo-700' },
+            { bg: 'bg-emerald-50/80', border: 'border-emerald-300', headerBg: 'bg-emerald-100/90', headerBorder: 'border-emerald-200', dot: 'bg-emerald-600', plateText: 'text-emerald-700' },
+            { bg: 'bg-amber-50/80', border: 'border-amber-300', headerBg: 'bg-amber-100/90', headerBorder: 'border-amber-200', dot: 'bg-amber-600', plateText: 'text-amber-700' },
+            { bg: 'bg-purple-50/80', border: 'border-purple-300', headerBg: 'bg-purple-100/90', headerBorder: 'border-purple-200', dot: 'bg-purple-600', plateText: 'text-purple-700' },
+            { bg: 'bg-rose-50/80', border: 'border-rose-300', headerBg: 'bg-rose-100/90', headerBorder: 'border-rose-200', dot: 'bg-rose-600', plateText: 'text-rose-700' }
+        ];
+
+        const globalState = {
+            cardCounters: {},
+            copiedState: {},
+            masterExcelStore: {},
+            cardDataStore: {}
+        };
 
         function handleInvoiceKeydown(event, input) {
             if (event.key === " ") {
@@ -130,17 +146,9 @@
                 const parts = input.id.split('-');
                 const vId = parts[1];
                 const cardId = parts[2];
+                syncCardData(vId, cardId);
                 refreshView(vId, cardId);
             }
-        }
-
-        function formatToAD(str) {
-            if (!str || str === "-") return "-";
-            return str.replace(/25(\d{2})/g, (match, p1) => {
-                const year = parseInt(match);
-                if (year > 2500 && year < 2600) return year - 543;
-                return match;
-            });
         }
 
         function formatToBE(str) {
@@ -150,6 +158,16 @@
                 if (year > 2000 && year < 2100) return year + 543;
                 return match;
             });
+        }
+
+        function extractDateOnly(dateTimeStr) {
+            if (!dateTimeStr) return "";
+            const parts = dateTimeStr.trim().split(' ');
+            return parts[0] || "";
+        }
+
+        function getSafeId(str) {
+            return str.replace(/[^a-zA-Z0-9ก-ฮ]/g, '_');
         }
 
         function navigateTo(pageId) {
@@ -165,7 +183,7 @@
             const container = document.getElementById('toast-container');
             const toast = document.createElement('div');
             toast.className = 'bg-slate-800 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-slate-700 toast-animate mb-2 pointer-events-auto';
-            toast.innerHTML = `<div class="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 01.414 0z" clipRule="evenodd" /></svg></div><span class="font-bold text-sm">${msg}</span>`;
+            toast.innerHTML = `<div class="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 01.414 0z" clip-rule="evenodd" /></svg></div><span class="font-bold text-sm">${msg}</span>`;
             container.appendChild(toast);
             setTimeout(() => toast.remove(), 2000);
         }
@@ -207,9 +225,9 @@
             document.execCommand('copy');
             document.body.removeChild(el);
 
-            if (!copiedState[vId]) copiedState[vId] = {};
-            if (!copiedState[vId][cardId]) copiedState[vId][cardId] = {};
-            copiedState[vId][cardId][copyType] = true;
+            if (!globalState.copiedState[vId]) globalState.copiedState[vId] = {};
+            if (!globalState.copiedState[vId][cardId]) globalState.copiedState[vId][cardId] = {};
+            globalState.copiedState[vId][cardId][copyType] = true;
 
             updateCopiedUI(vId, cardId);
             showToast("คัดลอก: " + label);
@@ -221,17 +239,16 @@
                 return;
             }
 
-            // 1. ตรวจสอบการข้ามรายการ
             const cards = Array.from(document.querySelectorAll(`[id^="card-item-${vId}-"]`));
             const currentIndex = cards.findIndex(c => c.id === `card-item-${vId}-${cardId}`);
             let uncopiedIndex = -1;
 
             for (let i = 0; i < currentIndex; i++) {
                 const prevCardId = cards[i].id.replace(`card-item-${vId}-`, '');
-                const state = copiedState[vId]?.[prevCardId] || {};
+                const state = globalState.copiedState[vId]?.[prevCardId] || {};
                 const hasCopied = Object.values(state).some(val => val === true);
                 if (!hasCopied) {
-                    uncopiedIndex = i + 1; // ลำดับรายการจริง (1-based)
+                    uncopiedIndex = i + 1;
                     break;
                 }
             }
@@ -241,13 +258,8 @@
                     `คุณข้ามการคัดลอกข้อมูล รายการที่ ${uncopiedIndex} ต้องการกลับไปคัดลอกรายการที่ ${uncopiedIndex} ก่อนหรือไม่?`,
                     "ตกลง (ไม่คัดลอก)",
                     "ยกเลิก (คัดลอกต่อ)",
-                    () => {
-                        // กดยืนยัน (ตกลง): ไม่ทำการคัดลอก
-                    },
-                    () => {
-                        // กดยกเลิก: ดำเนินการคัดลอกต่อ
-                        proceedCopyCheck();
-                    }
+                    () => {},
+                    () => { proceedCopyCheck(); }
                 );
                 return;
             }
@@ -255,15 +267,12 @@
             proceedCopyCheck();
 
             function proceedCopyCheck() {
-                // 2. ตรวจสอบการคัดลอกซ้ำในรายการเดิม
-                if (copiedState[vId]?.[cardId]?.[copyType]) {
+                if (globalState.copiedState[vId]?.[cardId]?.[copyType]) {
                     showConfirmModal(
                         `คุณคัดลอกข้อมูล${label}ของรายการนี้ไปแล้ว ต้องการคัดลอกซ้ำหรือไม่?`,
                         "คัดลอกซ้ำ",
                         "ยกเลิก",
-                        () => {
-                            executeCopy(text, label, vId, cardId, copyType);
-                        },
+                        () => { executeCopy(text, label, vId, cardId, copyType); },
                         null
                     );
                 } else {
@@ -273,7 +282,7 @@
         }
 
         function updateCopiedUI(vId, cardId) {
-            const state = copiedState[vId]?.[cardId] || {};
+            const state = globalState.copiedState[vId]?.[cardId] || {};
             const hasAnyCopied = Object.values(state).some(val => val === true);
             
             const badge = document.getElementById(`copied-badge-${vId}-${cardId}`);
@@ -285,6 +294,248 @@
             refreshView(vId, cardId);
         }
 
+        // --- MASTER EXCEL UPLOAD & GENERATION HANDLERS ---
+        function handleMasterExcelUpload(vId, event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                try {
+                    const buffer = e.target.result;
+                    const workbook = new ExcelJS.Workbook();
+                    await workbook.xlsx.load(buffer);
+                    
+                    globalState.masterExcelStore[vId] = {
+                        fileBuffer: buffer,
+                        fileName: file.name,
+                        workbook: workbook
+                    };
+
+                    document.getElementById(`master-excel-name-${vId}`).innerText = file.name;
+                    document.getElementById(`master-excel-clear-${vId}`).classList.remove('hidden');
+                    showToast("อัปโหลดไฟล์ Excel ต้นฉบับสำเร็จ");
+                } catch (err) {
+                    console.error(err);
+                    showToast("ไฟล์ Excel ไม่ถูกต้อง");
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function clearMasterExcel(vId) {
+            delete globalState.masterExcelStore[vId];
+            const input = document.getElementById(`master-excel-upload-${vId}`);
+            if (input) input.value = '';
+            
+            document.getElementById(`master-excel-name-${vId}`).innerText = '';
+            document.getElementById(`master-excel-clear-${vId}`).classList.add('hidden');
+            showToast("ลบไฟล์ Excel ต้นฉบับแล้ว");
+        }
+
+        function getCellText(cell) {
+            if (!cell || cell.value === undefined || cell.value === null) return "";
+            if (typeof cell.value === 'object' && cell.value.richText) {
+                return cell.value.richText.map(rt => rt.text).join('');
+            }
+            return String(cell.value);
+        }
+
+        async function generateGroupExcel(vId, groupKey) {
+            const store = globalState.masterExcelStore[vId];
+            if (!store || !store.workbook) {
+                showToast("กรุณาอัปโหลดไฟล์ Excel ต้นฉบับก่อนดำเนินการ");
+                return;
+            }
+
+            const safeId = getSafeId(groupKey);
+            const evidenceInput = document.getElementById(`group-evidence-${vId}-${safeId}`);
+            const evidenceVal = evidenceInput ? evidenceInput.value.trim() : "";
+
+            const groupContainer = document.getElementById(`group-box-${vId}-${safeId}`);
+            if (!groupContainer) {
+                showToast("ไม่พบกลุ่มข้อมูลนี้");
+                return;
+            }
+
+            const cards = Array.from(groupContainer.querySelectorAll(`[id^="card-item-${vId}-"]`));
+            if (cards.length === 0) {
+                showToast("ไม่มีรายการในกลุ่มนี้");
+                return;
+            }
+
+            const totalCount = cards.length;
+
+            const workbook = new ExcelJS.Workbook();
+            await workbook.xlsx.load(store.fileBuffer);
+            const ws = workbook.worksheets[0];
+
+            // เติมข้อมูล "หลักฐานจากบริษัทฯ" ลงในช่อง B2 ของ Worksheet เสมอ พร้อมขีดเส้นใต้เฉพาะบรรทัดที่ 2
+            const cellB2 = ws.getCell(2, 2);
+            let cellB2Val = getCellText(cellB2);
+            const cellFontB2 = cellB2.font || {};
+            const baseFontB2 = {
+                name: cellFontB2.name || 'TH SarabunPSK',
+                size: cellFontB2.size || 18,
+                bold: cellFontB2.bold || false,
+                italic: cellFontB2.italic || false,
+                color: cellFontB2.color || { argb: '000000' }
+            };
+            const line1FontB2 = { ...baseFontB2 };
+            delete line1FontB2.underline;
+            const line2FontB2 = { ...baseFontB2, size: 16, underline: true };
+
+            let linesB2 = cellB2Val.split(/\r?\n/);
+            let line1TextB2 = linesB2[0].trim() !== "" && linesB2[0].includes("หลักฐานจากบริษัทฯ") ? linesB2[0] : "หลักฐานจากบริษัทฯ:";
+
+            cellB2.value = {
+                richText: [
+                    { text: line1TextB2 + '\n', font: line1FontB2 },
+                    { text: evidenceVal, font: line2FontB2 }
+                ]
+            };
+
+            for (let i = 0; i < totalCount; i++) {
+                const card = cards[i];
+                const cardId = card.id.replace(`card-item-${vId}-`, '');
+                const startRow = 4 + i * 12;
+                const indexSeq = `${i + 1}/${totalCount}`;
+
+                for (let r = 4; r <= 14; r++) {
+                    const srcRow = ws.getRow(r);
+                    const destRowNumber = startRow + (r - 4);
+                    const destRow = ws.getRow(destRowNumber);
+                    destRow.height = srcRow.height;
+                    srcRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+                        const destCell = destRow.getCell(colNumber);
+                        destCell.value = cell.value;
+                        if (cell.style) {
+                            destCell.style = JSON.parse(JSON.stringify(cell.style));
+                        }
+                    });
+                }
+
+                const getInputVal = (fId) => document.getElementById(`input-${vId}-${cardId}-${fId}`)?.value || "";
+                const table = document.getElementById(`table-view-${vId}-${cardId}`);
+                const rowMap = {};
+                if (table) {
+                    table.querySelectorAll('tr').forEach(tr => {
+                        const tds = tr.querySelectorAll('td');
+                        if (tds.length >= 2) {
+                            rowMap[tds[0].innerText.trim()] = tds[1].innerText.trim();
+                        }
+                    });
+                }
+
+                for (let r = startRow; r <= startRow + 10; r++) {
+                    const row = ws.getRow(r);
+                    const cellB = row.getCell(2);
+                    let cellValB = getCellText(cellB);
+
+                    // 1. แทนที่ข้อความ หลักฐานจากบริษัทฯ / ตัวอักษร E ภายในแถวรายการ
+                    for (let c = 1; c <= 3; c++) {
+                        const cell = row.getCell(c);
+                        let cellTextVal = getCellText(cell);
+                        if (cellTextVal.includes("หลักฐานจากบริษัทฯ") || cellTextVal.includes("E") || cellTextVal.includes("e")) {
+                            let lines = cellTextVal.split(/\r?\n/);
+                            if (lines.length >= 2) {
+                                const cellFont = cell.font || {};
+                                const baseFont = {
+                                    name: cellFont.name || 'TH SarabunPSK',
+                                    size: cellFont.size || 18,
+                                    bold: cellFont.bold || false,
+                                    italic: cellFont.italic || false,
+                                    color: cellFont.color || { argb: '000000' }
+                                };
+                                const line1Font = { ...baseFont };
+                                delete line1Font.underline;
+                                const line2Font = { ...baseFont, size: 16, underline: true };
+
+                                let richTextParts = [{ text: lines[0] + '\n', font: line1Font }];
+                                for (let idx = 1; idx < lines.length; idx++) {
+                                    let cleanedLine = lines[idx].trim();
+                                    let t = (cleanedLine === 'E' || cleanedLine === 'e' || cleanedLine === '' || cleanedLine.includes("หลักฐานจากบริษัทฯ")) ? evidenceVal : lines[idx];
+                                    richTextParts.push({ text: t + (idx < lines.length - 1 ? '\n' : ''), font: line2Font });
+                                }
+                                cell.value = { richText: richTextParts };
+                            } else if (cellTextVal.trim() === 'E' || cellTextVal.trim() === 'e') {
+                                cell.value = evidenceVal;
+                                cell.font = { name: 'TH SarabunPSK', size: 16, underline: true };
+                            }
+                        }
+                    }
+
+                    // 2. เติมข้อมูลช่องตารางทั่วไป และช่องรายละเอียดผ่านทาง (1/2, 2/2)
+                    if (cellB && cellB.value !== undefined && cellB.value !== null) {
+                        let labelText = cellValB.trim().replace(/\r\n/g, '\n');
+
+                        if (labelText.includes("รายละเอียดผ่านทาง")) {
+                            const cellC = row.getCell(3);
+                            cellC.value = indexSeq;
+                        } else if (vId === 'v1' && labelText.includes("คำอธิบายเพิ่มเติม")) {
+                            const cellC = row.getCell(3);
+                            const pWrong = getInputVal('plateWrong');
+                            const pRight = getInputVal('plateRight');
+                            const noteVal = getInputVal('note');
+
+                            const cellFont = cellC.font || {};
+                            const baseFont = {
+                                name: cellFont.name || 'TH SarabunPSK',
+                                size: cellFont.size || 18,
+                                bold: cellFont.bold || false,
+                                italic: cellFont.italic || false,
+                                color: cellFont.color || { argb: '000000' }
+                            };
+
+                            const normalFont = { ...baseFont };
+                            delete normalFont.underline;
+                            const underlinedFont = { ...baseFont, underline: true };
+
+                            const richTextParts = [
+                                { text: `ทะเบียนที่อนุมัติคลาดเคลื่อน : ${pWrong}\n`, font: normalFont },
+                                { text: `ทะเบียนที่วิ่งใช้ทางจริง : ${pRight}`, font: underlinedFont }
+                            ];
+                            if (noteVal) {
+                                richTextParts.push({ text: `\n${noteVal}`, font: normalFont });
+                            }
+                            cellC.value = { richText: richTextParts };
+                        } else {
+                            Object.keys(rowMap).forEach(key => {
+                                const cleanKey = key.trim();
+                                if (labelText === cleanKey || labelText.startsWith(cleanKey) || cleanKey.startsWith(labelText.split('\n')[0])) {
+                                    const cellC = row.getCell(3);
+                                    const valToPut = rowMap[key] === "-" ? "" : rowMap[key];
+                                    cellC.value = String(valToPut);
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+
+            const originalName = store.fileName || "export.xlsx";
+            const nameParts = originalName.split('.');
+            const ext = nameParts.pop();
+            const baseName = nameParts.join('.');
+            const defaultName = `${baseName}_group_${groupKey.replace(/[\/\\?%*:|"<>]/g, '_')}`;
+
+            const userCustomName = prompt(`ตั้งชื่อไฟล์ Excel สำหรับกลุ่ม "${groupKey}":`, defaultName);
+            if (userCustomName === null) return;
+
+            const finalFileName = userCustomName.trim() !== "" ? `${userCustomName.trim()}.${ext}` : `${defaultName}.${ext}`;
+
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = finalFileName;
+            a.click();
+            window.URL.revokeObjectURL(url);
+
+            showToast(`สร้างและดาวน์โหลดไฟล์ Excel สำเร็จ`);
+        }
+
         function setupWorkPages() {
             const container = document.getElementById('work-pages-container');
             container.innerHTML = '';
@@ -294,7 +545,7 @@
                 section.id = `page-${vId}`;
                 section.className = 'min-h-screen hidden-page flex flex-col pb-12';
                 section.innerHTML = `
-                    <div class="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center sticky top-0 z-10 shadow-sm">
+                    <div class="bg-white border-b border-slate-200 px-6 py-4 flex flex-wrap justify-between items-center sticky top-0 z-10 shadow-sm gap-4">
                         <button onclick="navigateTo('pinai-menu')" class="flex items-center gap-2 text-slate-500 hover:text-slate-800 font-bold text-sm transition-colors">
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg> กลับ
                         </button>
@@ -302,93 +553,146 @@
                             <div class="w-6 h-6 ${config.color} rounded flex items-center justify-center text-white text-[10px] font-bold">${config.name.charAt(0)}</div>
                             <span class="font-extrabold text-slate-700 uppercase tracking-tight">${config.name}</span>
                         </div>
-                        <div class="flex items-center gap-2">
-                            <button onclick="sortAndGroupCards('${vId}')" class="bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm">🔀 จัดกลุ่มและเรียงลำดับ</button>
-                            <button onclick="addNewCard('${vId}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all">+ เพิ่มรายการ</button>
-                            <button onclick="resetInputs('${vId}')" class="text-rose-500 hover:bg-rose-50 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border border-transparent hover:border-rose-100">ล้างทั้งหมด</button>
+                        <div class="flex items-center flex-wrap gap-2">
+                            <div class="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+                                <span class="text-xs font-bold text-slate-600">📁 Excel ต้นฉบับ:</span>
+                                <input type="file" id="master-excel-upload-${vId}" accept=".xlsx, .xls" onchange="handleMasterExcelUpload('${vId}', event)" class="text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-emerald-50 file:text-emerald-700 cursor-pointer" />
+                                <span id="master-excel-name-${vId}" class="text-xs text-slate-400 font-bold truncate max-w-[100px]"></span>
+                                <button id="master-excel-clear-${vId}" onclick="clearMasterExcel('${vId}')" class="hidden text-rose-500 hover:text-rose-700 text-xs font-bold">✕</button>
+                            </div>
+                            <button onclick="sortAndGroupCards('${vId}')" class="bg-slate-800 hover:bg-slate-900 text-white px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-sm">🔀 จัดกลุ่มและเรียงลำดับ</button>
+                            <button onclick="addNewCard('${vId}', true)" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl text-xs font-bold transition-all">+ เพิ่มรายการ</button>
+                            <button onclick="resetInputs('${vId}')" class="text-rose-500 hover:bg-rose-50 px-3 py-2 rounded-xl text-xs font-bold transition-all border border-transparent hover:border-rose-100">ล้างทั้งหมด</button>
                         </div>
                     </div>
                     <div class="max-w-6xl mx-auto w-full p-6">
-                        <div id="cards-container-${vId}" class="flex flex-col gap-8"></div>
+                        <div id="groups-container-${vId}" class="flex flex-col gap-8"></div>
                     </div>
                 `;
                 container.appendChild(section);
-                addNewCard(vId);
+                // เรียกครั้งแรกโดยส่ง false เพื่อไม่ให้แสดง Toast ตอนเริ่มใช้งานโปรแกรม
+                addNewCard(vId, false);
             });
         }
 
-        function renumberCards(vId) {
-            const cards = document.querySelectorAll(`[id^="card-item-${vId}-"]`);
-            cards.forEach((card, index) => {
-                const titleSpan = card.querySelector('.card-title');
-                if (titleSpan) {
-                    titleSpan.innerText = `รายการที่ ${index + 1}`;
-                }
+        function getCardPlateValue(vId, cardId) {
+            const getVal = (f) => document.getElementById(`input-${vId}-${cardId}-${f}`)?.value || globalState.cardDataStore[vId]?.[cardId]?.[f] || "";
+            if (vId === 'v1') return getVal('plateWrong').trim() || "(ยังไม่ระบุทะเบียน)";
+            if (vId === 'trailer') return getVal('plateTrailer').trim() || getVal('plateFront').trim() || "(ยังไม่ระบุทะเบียน)";
+            return getVal('plate').trim() || "(ยังไม่ระบุทะเบียน)";
+        }
+
+        function syncCardData(vId, cardId) {
+            if (!globalState.cardDataStore[vId]) globalState.cardDataStore[vId] = {};
+            const inputs = document.querySelectorAll(`[id^="input-${vId}-${cardId}-"]`);
+            const data = {};
+            inputs.forEach(inp => {
+                const fId = inp.id.replace(`input-${vId}-${cardId}-`, '');
+                data[fId] = inp.value;
+            });
+            globalState.cardDataStore[vId][cardId] = data;
+        }
+
+        function renderGroups(vId, groupedData) {
+            const container = document.getElementById(`groups-container-${vId}`);
+            container.innerHTML = '';
+
+            const groupKeys = Object.keys(groupedData);
+
+            groupKeys.forEach((groupKey, groupIndex) => {
+                const cardsInfo = groupedData[groupKey];
+                const safeId = getSafeId(groupKey);
+                const parts = groupKey.split(' | อนุมัติ: ');
+                const plateText = parts[0] || "ยังไม่ระบุทะเบียน";
+                const approveDateText = parts[1] || "ไม่ระบุวันที่";
+
+                // เลือกโทนสีสลับกันตามลำดับกลุ่ม
+                const theme = groupThemes[groupIndex % groupThemes.length];
+
+                const groupDiv = document.createElement('div');
+                groupDiv.id = `group-box-${vId}-${safeId}`;
+                groupDiv.className = `${theme.bg} p-6 rounded-3xl border-2 ${theme.border} shadow-sm flex flex-col gap-6 transition-all`;
+                groupDiv.innerHTML = `
+                    <div class="flex flex-wrap justify-between items-center ${theme.headerBg} p-4 rounded-2xl border ${theme.headerBorder} gap-4">
+                        <div class="flex items-center gap-3">
+                            <span class="w-3 h-8 ${theme.dot} rounded-full"></span>
+                            <div>
+                                <h3 class="text-base font-extrabold text-slate-800">ทะเบียน: <span class="${theme.plateText}">${plateText}</span> | วันที่อนุมัติ: <span class="text-indigo-600">${approveDateText}</span></h3>
+                                <p class="text-xs font-bold text-slate-500">กลุ่มที่ ${groupIndex + 1} • จำนวน ${cardsInfo.length} รายการ</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center flex-wrap gap-3">
+                            <div class="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm">
+                                <span class="text-xs font-bold text-slate-600">📝 หลักฐานจากบริษัทฯ:</span>
+                                <input type="text" id="group-evidence-${vId}-${safeId}" value="${cardsInfo.evidenceVal || ''}" placeholder="กรอกข้อมูลแทนที่ E..." class="text-xs border border-slate-200 px-2.5 py-1 rounded-lg bg-slate-50 font-bold outline-none w-48 focus:bg-white focus:ring-2 ring-blue-200 transition-all" />
+                            </div>
+                            <button onclick="generateGroupExcel('${vId}', '${groupKey}')" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-100 flex items-center gap-1.5">
+                                📊 สร้างและดาวน์โหลด Excel (กลุ่มนี้)
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex flex-col gap-6 cards-in-group"></div>
+                `;
+
+                const cardsContainer = groupDiv.querySelector('.cards-in-group');
+                cardsInfo.forEach((item, index) => {
+                    cardsContainer.appendChild(item.cardElement);
+                    const titleSpan = item.cardElement.querySelector('.card-title');
+                    if (titleSpan) titleSpan.innerText = `รายการที่ ${index + 1} ในกลุ่ม (${index + 1}/${cardsInfo.length})`;
+                });
+
+                container.appendChild(groupDiv);
             });
         }
 
         function sortAndGroupCards(vId) {
-            const container = document.getElementById(`cards-container-${vId}`);
-            const cards = Array.from(container.querySelectorAll(`[id^="card-item-${vId}-"]`));
+            const cards = Array.from(document.querySelectorAll(`[id^="card-item-${vId}-"]`));
+            if (cards.length === 0) return;
 
-            if (cards.length <= 1) {
-                showToast("มีรายการไม่เพียงพอสำหรับการเรียงลำดับ");
-                return;
-            }
-
-            // รวบรวมข้อมูลจากการ์ดแต่ละใบ
-            const cardsData = cards.map(card => {
+            cards.forEach(card => {
                 const cardId = card.id.replace(`card-item-${vId}-`, '');
-                const inputs = card.querySelectorAll(`[id^="input-${vId}-${cardId}-"]`);
-                const inputValues = {};
-                inputs.forEach(inp => {
-                    const fieldName = inp.id.replace(`input-${vId}-${cardId}-`, '');
-                    inputValues[fieldName] = inp.value;
-                });
+                syncCardData(vId, cardId);
+            });
 
-                // ดึงค่าทะเบียนหลักสำหรับการจัดกลุ่ม
-                let plate = inputValues.plate || inputValues.plateWrong || inputValues.plateTrailer || inputValues.plateFront || "";
-                let passTime = inputValues.passTime || "";
+            const groupMap = {};
+            cards.forEach(card => {
+                const cardId = card.id.replace(`card-item-${vId}-`, '');
+                const plate = getCardPlateValue(vId, cardId);
+                const approveTimeInput = document.getElementById(`input-${vId}-${cardId}-approveTime`)?.value || "";
+                const approveDateOnly = extractDateOnly(approveTimeInput) || "ไม่ระบุวันที่";
 
-                return {
+                // จัดกลุ่มด้วย 2 เงื่อนไข: ทะเบียน และ วันที่อนุมัติ (ตัดวันที่ผ่านทางออก)
+                const groupKey = `${plate} | อนุมัติ: ${approveDateOnly}`;
+
+                if (!groupMap[groupKey]) groupMap[groupKey] = [];
+                groupMap[groupKey].push({
                     cardElement: card,
                     cardId: cardId,
-                    plate: plate.trim().toLowerCase(),
-                    passTime: passTime.trim(),
-                    inputValues: inputValues
-                };
+                    passTime: (document.getElementById(`input-${vId}-${cardId}-passTime`)?.value || "").trim()
+                });
             });
 
-            // เรียงลำดับ: 1. กลุ่มทะเบียนเหมือนกัน 2. เรียงตาม วัน-เวลา ผ่านทาง (A-Z)
-            cardsData.sort((a, b) => {
-                if (a.plate < b.plate) return -1;
-                if (a.plate > b.plate) return 1;
-                return a.passTime.localeCompare(b.passTime, 'th', { numeric: true });
+            Object.keys(groupMap).forEach(groupKey => {
+                groupMap[groupKey].sort((a, b) => a.passTime.localeCompare(b.passTime, 'th', { numeric: true }));
             });
 
-            // จัดเรียง Element ใน DOM ใหม่
-            cardsData.forEach(item => {
-                container.appendChild(item.cardElement);
-            });
-
-            renumberCards(vId);
-            showToast("จัดกลุ่มและเรียงลำดับเรียบร้อยแล้ว");
+            renderGroups(vId, groupMap);
+            showToast("จัดกลุ่มตามทะเบียนและวันที่อนุมัติเรียบร้อยแล้ว");
         }
 
-        function addNewCard(vId) {
-            if (!cardCounters[vId]) cardCounters[vId] = 0;
-            cardCounters[vId]++;
-            const cardId = cardCounters[vId];
+        function addNewCard(vId, showMsg = true) {
+            if (!globalState.cardCounters[vId]) globalState.cardCounters[vId] = 0;
+            globalState.cardCounters[vId]++;
+            const cardId = globalState.cardCounters[vId];
             const config = versionConfigs[vId];
             
-            const container = document.getElementById(`cards-container-${vId}`);
             const cardItem = document.createElement('div');
             cardItem.id = `card-item-${vId}-${cardId}`;
-            cardItem.className = 'bg-slate-100/60 p-6 rounded-3xl border border-slate-200 relative';
+            cardItem.className = 'bg-white p-6 rounded-3xl border border-slate-200 relative shadow-sm hover:shadow-md transition-all';
             cardItem.innerHTML = `
                 <div class="flex justify-between items-center mb-4 pb-2 border-b border-slate-200">
                     <div class="flex items-center gap-3">
-                        <span class="card-title font-extrabold text-slate-700 text-sm">รายการที่ 1</span>
+                        <span class="card-title font-extrabold text-slate-700 text-sm">รายการใหม่</span>
                         <span id="copied-badge-${vId}-${cardId}" class="hidden bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] px-2.5 py-0.5 rounded-full font-extrabold flex items-center gap-1">
                             ✓ คัดลอกแล้ว
                         </span>
@@ -396,7 +700,7 @@
                     <button onclick="removeCard('${vId}', ${cardId})" class="text-rose-500 hover:bg-rose-100 px-2 py-1 rounded-lg text-xs font-bold transition-all">✕ ลบรายการนี้</button>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 h-fit">
+                    <div class="bg-slate-50/50 p-6 rounded-3xl border border-slate-200 h-fit">
                         <h3 class="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2"><span class="w-2 h-6 ${config.color} rounded-full"></span> ฟอร์มข้อมูล</h3>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="fields-${vId}-${cardId}"></div>
                     </div>
@@ -406,16 +710,51 @@
                             <h4 class="${config.text} font-black text-2xl tracking-tight mb-6">${config.name}</h4>
                             <table class="table-custom" id="table-view-${vId}-${cardId}"></table>
                             <div class="mt-4 p-4 bg-yellow-50 border-2 border-dashed border-yellow-400 rounded-2xl text-[13px] font-bold text-slate-700" id="yellow-msg-${vId}-${cardId}"></div>
-                            <div class="mt-8 grid grid-cols-1 gap-2" id="copy-buttons-${vId}-${cardId}"></div>
+                            <div class="mt-6 grid grid-cols-1 gap-2" id="copy-buttons-${vId}-${cardId}"></div>
                         </div>
                     </div>
                 </div>
             `;
-            container.appendChild(cardItem);
-            
+
+            const defaultGroupKey = "(ยังไม่ระบุทะเบียน) | อนุมัติ: ไม่ระบุวันที่";
+            const safeDefaultId = getSafeId(defaultGroupKey);
+            let groupDiv = document.getElementById(`group-box-${vId}-${safeDefaultId}`);
+            if (!groupDiv) {
+                const container = document.getElementById(`groups-container-${vId}`);
+                groupDiv = document.createElement('div');
+                groupDiv.id = `group-box-${vId}-${safeDefaultId}`;
+                groupDiv.className = 'bg-slate-100/80 p-6 rounded-3xl border-2 border-slate-300 shadow-sm flex flex-col gap-6';
+                groupDiv.innerHTML = `
+                    <div class="flex flex-wrap justify-between items-center bg-white p-4 rounded-2xl border border-slate-200 gap-4">
+                        <div class="flex items-center gap-3">
+                            <span class="w-3 h-8 bg-slate-400 rounded-full"></span>
+                            <div>
+                                <h3 class="text-base font-extrabold text-slate-800">กลุ่มเริ่มต้น: <span class="text-slate-600">ยังไม่ระบุข้อมูล</span></h3>
+                                <p class="text-xs font-bold text-slate-400">รายการใหม่</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center flex-wrap gap-3">
+                            <div class="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm">
+                                <span class="text-xs font-bold text-slate-600">📝 หลักฐานจากบริษัทฯ:</span>
+                                <input type="text" id="group-evidence-${vId}-${safeDefaultId}" placeholder="กรอกข้อมูลแทนที่ E..." class="text-xs border border-slate-200 px-2.5 py-1 rounded-lg bg-white font-bold outline-none w-48" />
+                            </div>
+                            <button onclick="generateGroupExcel('${vId}', '${defaultGroupKey}')" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-100 flex items-center gap-1.5">
+                                📊 สร้างและดาวน์โหลด Excel (กลุ่มนี้)
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex flex-col gap-6 cards-in-group"></div>
+                `;
+                container.appendChild(groupDiv);
+            }
+
+            groupDiv.querySelector('.cards-in-group').appendChild(cardItem);
             renderFields(vId, cardId);
             refreshView(vId, cardId);
-            renumberCards(vId);
+
+            if (showMsg) {
+                showToast("เพิ่มรายการใหม่แล้ว");
+            }
         }
 
         function removeCard(vId, cardId) {
@@ -426,9 +765,14 @@
                     showToast("ต้องมีอย่างน้อย 1 รายการ");
                     return;
                 }
+                const groupParent = card.closest('[id^="group-box-"]');
                 card.remove();
-                delete copiedState[vId]?.[cardId];
-                renumberCards(vId);
+                delete globalState.cardDataStore[vId]?.[cardId];
+                delete globalState.copiedState[vId]?.[cardId];
+
+                if (groupParent && groupParent.querySelectorAll(`[id^="card-item-${vId}-"]`).length === 0) {
+                    groupParent.remove();
+                }
                 showToast("ลบรายการแล้ว");
             }
         }
@@ -437,7 +781,7 @@
             const config = versionConfigs[vId];
             const fieldsContainer = document.getElementById(`fields-${vId}-${cardId}`);
             let fields = [];
-            
+
             const baseFieldsTop = [
                 { id: 'passTime', label: 'วัน-เวลา ผ่านทาง', placeholder: '01/02/2567 10:30' },
                 { id: 'approveTime', label: 'วัน-เวลา อนุมัติ', placeholder: '01/02/2567 11:00' },
@@ -488,19 +832,19 @@
             fieldsContainer.innerHTML = fields.map(f => {
                 const isInvoiceField = f.id === 'invoiceNo';
                 const inputAttrs = isInvoiceField 
-                    ? `onkeydown="handleInvoiceKeydown(event, this)" oninput="refreshView('${vId}', '${cardId}')"` 
-                    : `oninput="refreshView('${vId}', '${cardId}')"`;
+                    ? `onkeydown="handleInvoiceKeydown(event, this)" oninput="syncCardData('${vId}', '${cardId}'); refreshView('${vId}', '${cardId}')"` 
+                    : `oninput="syncCardData('${vId}', '${cardId}'); refreshView('${vId}', '${cardId}')"`;
 
                 return `
                 <div id="wrapper-${vId}-${cardId}-${f.id}" class="flex flex-col gap-1 ${f.span ? 'md:col-span-2' : ''} ${f.isHidden ? 'hidden' : ''}">
                     <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">${f.label}</label>
                     ${f.type === 'select' ? 
-                        `<select id="input-${vId}-${cardId}-${f.id}" onchange="onSelectChange('${vId}', '${cardId}', '${f.id}')" class="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-slate-50 focus:bg-white focus:ring-2 ring-blue-100 outline-none transition-all font-bold cursor-pointer">
+                        `<select id="input-${vId}-${cardId}-${f.id}" onchange="syncCardData('${vId}', '${cardId}'); onSelectChange('${vId}', '${cardId}', '${f.id}')" class="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-white focus:ring-2 ring-blue-100 outline-none transition-all font-bold cursor-pointer">
                             <option value="">เลือก${f.label}</option>${f.options.map(o => `<option value="${o}">${o}</option>`).join('')}
                         </select>` :
                         f.id === 'otherReason' || f.id === 'note' ?
-                        `<textarea id="input-${vId}-${cardId}-${f.id}" oninput="refreshView('${vId}', '${cardId}')" placeholder="${f.placeholder}" class="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-slate-50 focus:bg-white focus:ring-2 ring-blue-100 outline-none transition-all font-bold h-24">${vId === 'exempt-backdated' && f.id === 'note' ? 'เป็นรายการผ่านทาง (ที่มีหนังสือยกเว้น)' : ''}</textarea>` :
-                        `<input id="input-${vId}-${cardId}-${f.id}" ${inputAttrs} placeholder="${f.placeholder}" class="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-slate-50 focus:bg-white focus:ring-2 ring-blue-100 outline-none transition-all font-bold" />`
+                        `<textarea id="input-${vId}-${cardId}-${f.id}" oninput="syncCardData('${vId}', '${cardId}'); refreshView('${vId}', '${cardId}')" placeholder="${f.placeholder}" class="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-white focus:ring-2 ring-blue-100 outline-none transition-all font-bold h-24">${vId === 'exempt-backdated' && f.id === 'note' ? 'เป็นรายการผ่านทาง (ที่มีหนังสือยกเว้น)' : ''}</textarea>` :
+                        `<input id="input-${vId}-${cardId}-${f.id}" ${inputAttrs} placeholder="${f.placeholder}" class="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-white focus:ring-2 ring-blue-100 outline-none transition-all font-bold" />`
                     }
                 </div>`;
             }).join('');
@@ -537,7 +881,7 @@
             let rows = [];
             let extraButtons = "";
 
-            const isCopied = (type) => copiedState[vId]?.[cardId]?.[type];
+            const isCopied = (type) => globalState.copiedState[vId]?.[cardId]?.[type];
 
             if (vId === 'one-percent') {
                 rows = [
@@ -635,6 +979,7 @@
                 if (vId === 'delayed') yellowMsg.innerText = `ข้าพเจ้าไม่ได้สมัครสมาชิกแต่มีการวิ่งผ่านทาง Mflow ด้วยทะเบียน ${data.plate} เเต่ระบบมีการสร้างรายการย้อนหลังโดยที่ไม่แจ้งให้ข้าพเจ้าทราบจึงทำให้เกิดค่าปรับ ข้าพเจ้าขอพิจารณาค่าปรับ ยินดีชำระเฉพาะค่าผ่านทางตามจริง เป็นรายการผ่านทางตั้งแต่วันที่ ${pt}`;
                 else if (vId === 'exempt-backdated') yellowMsg.innerText = `ขอตรวจสอบข้อมูลพินัยมีหนังสือยกเว้นย้อนหลัง สำหรับทะเบียน ${data.plate} รายการผ่านทางวันที่ ${pt}`;
             } else if (vId === 'v1') {
+                const finalNote = `ทะเบียนที่อนุมัติคลาดเคลื่อน : ${data.plateWrong}\nทะเบียนที่วิ่งใช้ทางจริง : ${data.plateRight}${data.note !== "-" ? "\n" + data.note : ""}`;
                 rows = [
                     ["ทะเบียน", data.plateWrong],
                     ["วัน-เวลา ผ่านทาง", pt],
@@ -644,7 +989,7 @@
                     ["ประเภทรถ", data.carType],
                     ["ด่าน", data.station],
                     ["เลน", data.lane],
-                    ["หมายเหตุ", data.note]
+                    ["คำอธิบายเพิ่มเติม", finalNote]
                 ];
                 yellowMsg.innerText = `ข้าพเจ้าขอปฏิเสธรายการผ่านทางของทะเบียน ${data.plateWrong} เนื่องจากไม่ได้ผ่านทางในวันที่ ${pt}`;
                 
@@ -736,19 +1081,23 @@
         }
 
         function resetInputs(vId) {
-            // 1. เคลียร์การ์ดเดิมใน container ออกทั้งหมด
-            const container = document.getElementById(`cards-container-${vId}`);
+            const container = document.getElementById(`groups-container-${vId}`);
             if (container) {
                 container.innerHTML = '';
             }
+            delete globalState.copiedState[vId];
+            delete globalState.masterExcelStore[vId];
+            delete globalState.cardDataStore[vId];
+            globalState.cardCounters[vId] = 0;
 
-            // 2. ล้างสถานะการคัดลอก และรีเซ็ตตัวนับลำดับการ์ด
-            delete copiedState[vId];
-            cardCounters[vId] = 0;
+            const uploadInput = document.getElementById(`master-excel-upload-${vId}`);
+            if (uploadInput) uploadInput.value = '';
+            const nameSpan = document.getElementById(`master-excel-name-${vId}`);
+            if (nameSpan) nameSpan.innerText = '';
+            const clearBtn = document.getElementById(`master-excel-clear-${vId}`);
+            if (clearBtn) clearBtn.classList.add('hidden');
 
-            // 3. สร้างการ์ดใหม่ขึ้นมาแค่ 1 การ์ด (ว่างเปล่า)
-            addNewCard(vId);
-
+            addNewCard(vId, false);
             showToast("ล้างข้อมูลแล้ว");
         }
 
