@@ -7,6 +7,9 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- ใช้ไลบรารี ExcelJS เพื่อรักษารูปแบบ ฟอนต์ และเส้นขอบเดิม 100% -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+    <!-- ไลบรารีสำหรับแปลงเป็น PDF (jsPDF และ html2canvas) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Sarabun', sans-serif; background-color: #f8fafc; }
@@ -33,6 +36,18 @@
             <div class="flex gap-3 justify-end">
                 <button id="confirm-cancel-btn" class="px-4 py-2.5 rounded-xl font-bold text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all">ยกเลิก</button>
                 <button id="confirm-ok-btn" class="px-4 py-2.5 rounded-xl font-bold text-xs bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-md shadow-blue-200">ตกลง</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal แสดงสถานะการสร้าง PDF -->
+    <div id="pdf-progress-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[120] flex items-center justify-center hidden">
+        <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full mx-4 text-center border border-slate-100">
+            <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4 font-bold text-2xl animate-pulse">📄</div>
+            <h3 class="text-xl font-bold text-slate-800 mb-2">กำลังสร้างไฟล์ PDF</h3>
+            <p id="pdf-progress-text" class="text-sm text-slate-600 font-medium mb-4">กำลังเตรียมข้อมูลและจัดหน้ากระดาษ (0%)</p>
+            <div class="w-full bg-slate-100 h-3 rounded-full overflow-hidden mb-2">
+                <div id="pdf-progress-bar" class="bg-blue-600 h-full w-0 transition-all duration-300"></div>
             </div>
         </div>
     </div>
@@ -109,7 +124,6 @@
             'trailer': { name: 'พินัยพ่วงหลัง', color: 'bg-amber-600', text: 'text-amber-600', type: 'trailer' }
         };
 
-        // ชุดโทนสีสำหรับจัดกลุ่มแยกกันให้ชัดเจน
         const groupThemes = [
             { bg: 'bg-sky-50/80', border: 'border-sky-300', headerBg: 'bg-sky-100/90', headerBorder: 'border-sky-200', dot: 'bg-sky-600', plateText: 'text-sky-700' },
             { bg: 'bg-indigo-50/80', border: 'border-indigo-300', headerBg: 'bg-indigo-100/90', headerBorder: 'border-indigo-200', dot: 'bg-indigo-600', plateText: 'text-indigo-700' },
@@ -294,6 +308,50 @@
             refreshView(vId, cardId);
         }
 
+        // --- HIGH-RESOLUTION UPSCALING IMAGE UPLOAD HANDLER ---
+        function handleCardImageUpload(vId, cardId, event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    // ทำการ Upscale เพิ่มความละเอียดภาพ (คูณ 3 เท่า พร้อมเปิดโหมดคมชัดสูงสุด)
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    
+                    const scale = 3;
+                    canvas.width = img.width * scale;
+                    canvas.height = img.height * scale;
+                    
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.imageSmoothingQuality = 'high';
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    
+                    const base64Data = canvas.toDataURL('image/png', 1.0);
+
+                    if (!globalState.cardDataStore[vId]) globalState.cardDataStore[vId] = {};
+                    if (!globalState.cardDataStore[vId][cardId]) globalState.cardDataStore[vId][cardId] = {};
+                    globalState.cardDataStore[vId][cardId].cardImage = base64Data;
+
+                    const previewEl = document.getElementById(`img-preview-${vId}-${cardId}`);
+                    if (previewEl) {
+                        previewEl.src = base64Data;
+                        previewEl.classList.remove('hidden');
+                    }
+                    const nameEl = document.getElementById(`img-name-${vId}-${cardId}`);
+                    if (nameEl) {
+                        nameEl.innerText = `${file.name} (ความละเอียดสูง ${canvas.width}x${canvas.height}px)`;
+                    }
+                    showToast("อัปโหลดและเพิ่มความคมชัดรูปภาพสำเร็จ");
+                    refreshView(vId, cardId);
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
         // --- MASTER EXCEL UPLOAD & GENERATION HANDLERS ---
         function handleMasterExcelUpload(vId, event) {
             const file = event.target.files[0];
@@ -431,6 +489,7 @@
                     const row = ws.getRow(r);
                     const cellB = row.getCell(2);
                     let cellValB = getCellText(cellB);
+                    let labelText = cellValB.trim().replace(/\r\n/g, '\n');
 
                     // 1. แทนที่ข้อความ หลักฐานจากบริษัทฯ / ตัวอักษร E ภายในแถวรายการ
                     for (let c = 1; c <= 3; c++) {
@@ -467,8 +526,6 @@
 
                     // 2. เติมข้อมูลช่องตารางทั่วไป และช่องรายละเอียดผ่านทาง (1/2, 2/2)
                     if (cellB && cellB.value !== undefined && cellB.value !== null) {
-                        let labelText = cellValB.trim().replace(/\r\n/g, '\n');
-
                         if (labelText.includes("รายละเอียดผ่านทาง")) {
                             const cellC = row.getCell(3);
                             cellC.value = indexSeq;
@@ -510,6 +567,28 @@
                             });
                         }
                     }
+
+                    // 3. ฝังรูปภาพลงใน Column C ด้วยขนาดความกว้างและสูงที่คุณต้องการ (width: 540, height: 310) โดยไม่แก้ไขความสูงแถวต้นฉบับ
+                    if (labelText.includes("รูปทะเบียน") || labelText.includes("รูปหน้ารถ")) {
+                        const cardImg = globalState.cardDataStore[vId]?.[cardId]?.cardImage;
+                        if (cardImg) {
+                            try {
+                                const base64Data = cardImg.split(',')[1] || cardImg;
+                                const ext = cardImg.includes('image/jpeg') ? 'jpeg' : 'png';
+                                const imageId = workbook.addImage({
+                                    base64: base64Data,
+                                    extension: ext
+                                });
+                                ws.addImage(imageId, {
+                                    tl: { col: 2.05, row: r - 0.95 },
+                                    ext: { width: 540, height: 310 },
+                                    editAs: 'oneCell'
+                                });
+                            } catch (imgErr) {
+                                console.error("Error adding image to Excel:", imgErr);
+                            }
+                        }
+                    }
                 }
             }
 
@@ -534,6 +613,91 @@
             window.URL.revokeObjectURL(url);
 
             showToast(`สร้างและดาวน์โหลดไฟล์ Excel สำเร็จ`);
+        }
+
+        // --- PDF EXPORT HANDLER WITH PROGRESS POPUP ---
+        async function generateGroupPDF(vId, groupKey) {
+            const safeId = getSafeId(groupKey);
+            const groupContainer = document.getElementById(`group-box-${vId}-${safeId}`);
+            if (!groupContainer) {
+                showToast("ไม่พบกลุ่มข้อมูลนี้");
+                return;
+            }
+
+            const modal = document.getElementById('pdf-progress-modal');
+            const progressBar = document.getElementById('pdf-progress-bar');
+            const progressText = document.getElementById('pdf-progress-text');
+
+            modal.classList.remove('hidden');
+            progressBar.style.width = '10%';
+            progressText.innerText = 'กำลังเตรียมข้อมูลและจัดหน้ากระดาษ (10%)';
+
+            try {
+                await new Promise(r => setTimeout(r, 300));
+                progressBar.style.width = '35%';
+                progressText.innerText = 'กำลังเรนเดอร์รูปภาพและตาราง (35%)';
+
+                const hideElements = groupContainer.querySelectorAll('button, input[type="file"], input[type="text"]');
+                hideElements.forEach(el => el.style.visibility = 'hidden');
+
+                await new Promise(r => setTimeout(r, 400));
+                progressBar.style.width = '65%';
+                progressText.innerText = 'กำลังสร้างภาพหน้าเอกสาร (65%)';
+
+                const canvas = await html2canvas(groupContainer, {
+                    scale: 2,
+                    useCORS: true,
+                    logging: false,
+                    backgroundColor: '#ffffff'
+                });
+
+                hideElements.forEach(el => el.style.visibility = 'visible');
+
+                await new Promise(r => setTimeout(r, 300));
+                progressBar.style.width = '85%';
+                progressText.innerText = 'กำลังแปลงเป็นไฟล์ PDF (85%)';
+
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF('p', 'mm', 'a4');
+                const imgData = canvas.toDataURL('image/png');
+                
+                const pdfWidth = pdf.internal.pageSize.getWidth();
+                const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+
+                let heightLeft = pdfHeight;
+                let position = 0;
+                let pageHeight = pdf.internal.pageSize.getHeight();
+
+                pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
+                heightLeft -= pageHeight;
+
+                while (heightLeft >= 0) {
+                    position = heightLeft - pdfHeight;
+                    pdf.addPage();
+                    pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
+                    heightLeft -= pageHeight;
+                }
+
+                progressBar.style.width = '100%';
+                progressText.innerText = 'เสร็จสิ้น กำลังดาวน์โหลดไฟล์ (100%)';
+
+                await new Promise(r => setTimeout(r, 400));
+                modal.classList.add('hidden');
+
+                const defaultName = `Pinai_Group_${groupKey.replace(/[\/\\?%*:|"<>]/g, '_')}.pdf`;
+                const userCustomName = prompt(`ตั้งชื่อไฟล์ PDF สำหรับกลุ่มนี้:`, defaultName);
+                if (userCustomName !== null) {
+                    const finalName = userCustomName.trim() !== "" ? (userCustomName.endsWith('.pdf') ? userCustomName : userCustomName + '.pdf') : defaultName;
+                    pdf.save(finalName);
+                    showToast("ดาวน์โหลดไฟล์ PDF สำเร็จ");
+                }
+            } catch (err) {
+                console.error("PDF Generation Error:", err);
+                modal.classList.add('hidden');
+                showToast("เกิดข้อผิดพลาดในการสร้าง PDF");
+                const hideElements = groupContainer.querySelectorAll('button, input[type="file"], input[type="text"]');
+                hideElements.forEach(el => el.style.visibility = 'visible');
+            }
         }
 
         function setupWorkPages() {
@@ -570,7 +734,6 @@
                     </div>
                 `;
                 container.appendChild(section);
-                // เรียกครั้งแรกโดยส่ง false เพื่อไม่ให้แสดง Toast ตอนเริ่มใช้งานโปรแกรม
                 addNewCard(vId, false);
             });
         }
@@ -584,13 +747,12 @@
 
         function syncCardData(vId, cardId) {
             if (!globalState.cardDataStore[vId]) globalState.cardDataStore[vId] = {};
+            if (!globalState.cardDataStore[vId][cardId]) globalState.cardDataStore[vId][cardId] = {};
             const inputs = document.querySelectorAll(`[id^="input-${vId}-${cardId}-"]`);
-            const data = {};
             inputs.forEach(inp => {
                 const fId = inp.id.replace(`input-${vId}-${cardId}-`, '');
-                data[fId] = inp.value;
+                globalState.cardDataStore[vId][cardId][fId] = inp.value;
             });
-            globalState.cardDataStore[vId][cardId] = data;
         }
 
         function renderGroups(vId, groupedData) {
@@ -606,7 +768,6 @@
                 const plateText = parts[0] || "ยังไม่ระบุทะเบียน";
                 const approveDateText = parts[1] || "ไม่ระบุวันที่";
 
-                // เลือกโทนสีสลับกันตามลำดับกลุ่ม
                 const theme = groupThemes[groupIndex % groupThemes.length];
 
                 const groupDiv = document.createElement('div');
@@ -628,6 +789,9 @@
                             </div>
                             <button onclick="generateGroupExcel('${vId}', '${groupKey}')" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-100 flex items-center gap-1.5">
                                 📊 สร้างและดาวน์โหลด Excel (กลุ่มนี้)
+                            </button>
+                            <button onclick="generateGroupPDF('${vId}', '${groupKey}')" class="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md shadow-rose-100 flex items-center gap-1.5">
+                                📄 ดาวน์โหลด PDF (กลุ่มนี้)
                             </button>
                         </div>
                     </div>
@@ -661,7 +825,6 @@
                 const approveTimeInput = document.getElementById(`input-${vId}-${cardId}-approveTime`)?.value || "";
                 const approveDateOnly = extractDateOnly(approveTimeInput) || "ไม่ระบุวันที่";
 
-                // จัดกลุ่มด้วย 2 เงื่อนไข: ทะเบียน และ วันที่อนุมัติ (ตัดวันที่ผ่านทางออก)
                 const groupKey = `${plate} | อนุมัติ: ${approveDateOnly}`;
 
                 if (!groupMap[groupKey]) groupMap[groupKey] = [];
@@ -700,9 +863,19 @@
                     <button onclick="removeCard('${vId}', ${cardId})" class="text-rose-500 hover:bg-rose-100 px-2 py-1 rounded-lg text-xs font-bold transition-all">✕ ลบรายการนี้</button>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <div class="bg-slate-50/50 p-6 rounded-3xl border border-slate-200 h-fit">
-                        <h3 class="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2"><span class="w-2 h-6 ${config.color} rounded-full"></span> ฟอร์มข้อมูล</h3>
+                    <div class="bg-slate-50/50 p-6 rounded-3xl border border-slate-200 h-fit flex flex-col gap-4">
+                        <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2"><span class="w-2 h-6 ${config.color} rounded-full"></span> ฟอร์มข้อมูล</h3>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="fields-${vId}-${cardId}"></div>
+                        
+                        <!-- ช่องอัปโหลดรูปภาพ (ความคมชัดสูง) -->
+                        <div class="mt-2 p-4 bg-white rounded-2xl border border-slate-200 flex flex-col gap-2">
+                            <label class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">📷 อัปโหลดรูปภาพที่แคปมา (หน้ารถ + ป้ายทะเบียน)</label>
+                            <div class="flex items-center gap-3">
+                                <input type="file" id="card-img-upload-${vId}-${cardId}" accept="image/*" onchange="handleCardImageUpload('${vId}', '${cardId}', event)" class="text-xs text-slate-500 file:mr-2 file:py-1 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 cursor-pointer" />
+                            </div>
+                            <span id="img-name-${vId}-${cardId}" class="text-xs text-slate-400 font-bold truncate"></span>
+                            <img id="img-preview-${vId}-${cardId}" class="hidden w-full max-h-64 object-contain rounded-xl border border-slate-200 mt-1 shadow-sm bg-slate-900/5" />
+                        </div>
                     </div>
                     <div class="flex flex-col gap-4">
                         <div class="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-200 relative overflow-hidden" id="pdf-content-${vId}-${cardId}">
@@ -740,6 +913,9 @@
                             </div>
                             <button onclick="generateGroupExcel('${vId}', '${defaultGroupKey}')" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-100 flex items-center gap-1.5">
                                 📊 สร้างและดาวน์โหลด Excel (กลุ่มนี้)
+                            </button>
+                            <button onclick="generateGroupPDF('${vId}', '${defaultGroupKey}')" class="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md shadow-rose-100 flex items-center gap-1.5">
+                                📄 ดาวน์โหลด PDF (กลุ่มนี้)
                             </button>
                         </div>
                     </div>
@@ -882,6 +1058,8 @@
             let extraButtons = "";
 
             const isCopied = (type) => globalState.copiedState[vId]?.[cardId]?.[type];
+            const imgData = globalState.cardDataStore[vId]?.[cardId]?.cardImage;
+            const imgHtml = imgData ? `<img src="${imgData}" class="w-full max-h-56 object-contain rounded-xl border border-slate-200 my-1 shadow-sm"/>` : "-";
 
             if (vId === 'one-percent') {
                 rows = [
@@ -893,7 +1071,7 @@
                     ["ประเภทรถ", data.carType],
                     ["ด่าน", data.station],
                     ["เลน", data.lane],
-                    ["รูปทะเบียน รูปหน้ารถ", "-"],
+                    ["รูปทะเบียน รูปหน้ารถ", imgHtml],
                     ["คำอธิบายเพิ่มเติม", data.note]
                 ];
 
@@ -932,7 +1110,7 @@
                     ["ประเภทรถ", data.carType],
                     ["ด่าน", data.station],
                     ["เลน", data.lane],
-                    ["รูปทะเบียน", ""],
+                    ["รูปทะเบียน", imgHtml],
                     ["คำอธิบายเพิ่มเติม", finalNote]
                 ];
                 yellowMsg.innerText = rejectReason;
@@ -946,6 +1124,7 @@
                     ["ประเภทรถ", data.carType],
                     ["ด่าน", data.station],
                     ["เลน", data.lane],
+                    ["รูปทะเบียน", imgHtml],
                     ["หมายเหตุ", data.note]
                 ];
                 yellowMsg.innerText = `ขอปฏิเสธการโต้แย้ง เนื่องจากรถทะเบียน ${data.plateTrailer} ซึ่งเป็นส่วนพ่วงหลัง ได้ผ่านทางเมื่อวันที่ ${pt} จริง`;
@@ -973,7 +1152,7 @@
                     ["ประเภทรถ", data.carType],
                     ["ด่าน", data.station],
                     ["เลน", data.lane],
-                    ["รูปทะเบียน รูปหน้ารถ", "-"],
+                    ["รูปทะเบียน รูปหน้ารถ", imgHtml],
                     ["หมายเหตุ", data.note]
                 ];
                 if (vId === 'delayed') yellowMsg.innerText = `ข้าพเจ้าไม่ได้สมัครสมาชิกแต่มีการวิ่งผ่านทาง Mflow ด้วยทะเบียน ${data.plate} เเต่ระบบมีการสร้างรายการย้อนหลังโดยที่ไม่แจ้งให้ข้าพเจ้าทราบจึงทำให้เกิดค่าปรับ ข้าพเจ้าขอพิจารณาค่าปรับ ยินดีชำระเฉพาะค่าผ่านทางตามจริง เป็นรายการผ่านทางตั้งแต่วันที่ ${pt}`;
@@ -989,6 +1168,7 @@
                     ["ประเภทรถ", data.carType],
                     ["ด่าน", data.station],
                     ["เลน", data.lane],
+                    ["รูปทะเบียน รูปหน้ารถ", imgHtml],
                     ["คำอธิบายเพิ่มเติม", finalNote]
                 ];
                 yellowMsg.innerText = `ข้าพเจ้าขอปฏิเสธรายการผ่านทางของทะเบียน ${data.plateWrong} เนื่องจากไม่ได้ผ่านทางในวันที่ ${pt}`;
