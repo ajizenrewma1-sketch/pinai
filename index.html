@@ -317,7 +317,6 @@
             reader.onload = function(e) {
                 const img = new Image();
                 img.onload = function() {
-                    // ทำการ Upscale เพิ่มความละเอียดภาพ (คูณ 3 เท่า พร้อมเปิดโหมดคมชัดสูงสุด)
                     const canvas = document.createElement('canvas');
                     const ctx = canvas.getContext('2d');
                     
@@ -568,7 +567,7 @@
                         }
                     }
 
-                    // 3. ฝังรูปภาพลงใน Column C ด้วยขนาดความกว้างและสูงที่คุณต้องการ (width: 540, height: 310) โดยไม่แก้ไขความสูงแถวต้นฉบับ
+                    // 3. ฝังรูปภาพลงใน Column C ด้วยขนาด width: 540, height: 310 โดยไม่ปรับเปลี่ยนขนาดแถวต้นฉบับ
                     if (labelText.includes("รูปทะเบียน") || labelText.includes("รูปหน้ารถ")) {
                         const cardImg = globalState.cardDataStore[vId]?.[cardId]?.cardImage;
                         if (cardImg) {
@@ -596,7 +595,18 @@
             const nameParts = originalName.split('.');
             const ext = nameParts.pop();
             const baseName = nameParts.join('.');
-            const defaultName = `${baseName}_group_${groupKey.replace(/[\/\\?%*:|"<>]/g, '_')}`;
+
+            // ดึงค่าจากช่อง "หลักฐานจากบริษัทฯ" มาทำชื่อไฟล์โดยตรง และแปลงตัวที่ 5 จาก 4 ตัวท้ายที่เป็น / ให้เป็น _
+            let fileNameBase = evidenceVal;
+            if (fileNameBase) {
+                if (fileNameBase.length >= 5 && fileNameBase[fileNameBase.length - 5] === '/') {
+                    fileNameBase = fileNameBase.slice(0, fileNameBase.length - 5) + '_' + fileNameBase.slice(fileNameBase.length - 4);
+                }
+                fileNameBase = fileNameBase.replace(/[\/\\?%*:|"<>]/g, '_');
+            } else {
+                fileNameBase = `${baseName}_group_${groupKey.replace(/[\/\\?%*:|"<>]/g, '_')}`;
+            }
+            const defaultName = fileNameBase;
 
             const userCustomName = prompt(`ตั้งชื่อไฟล์ Excel สำหรับกลุ่ม "${groupKey}":`, defaultName);
             if (userCustomName === null) return;
