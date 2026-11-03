@@ -180,6 +180,34 @@
             return parts[0] || "";
         }
 
+        // แปลงข้อความวัน-เวลา (เช่น 01/02/2567 10:30 หรือ 01/02/2024 10:30) เป็น Date Object เพื่อการเปรียบเทียบที่แม่นยำ
+        function parseDateTime(dateTimeStr) {
+            if (!dateTimeStr || dateTimeStr.trim() === "") return new Date(0);
+            try {
+                const [datePart, timePart] = dateTimeStr.trim().split(' ');
+                if (!datePart) return new Date(0);
+                
+                const dParts = datePart.split('/');
+                if (dParts.length < 3) return new Date(0);
+                
+                let day = parseInt(dParts[0], 10);
+                let month = parseInt(dParts[1], 10) - 1;
+                let year = parseInt(dParts[2], 10);
+                if (year > 2400) year -= 543; // แปลง พ.ศ. เป็น ค.ศ.
+
+                let hour = 0, min = 0, sec = 0;
+                if (timePart) {
+                    const tParts = timePart.split(':');
+                    hour = parseInt(tParts[0] || '0', 10);
+                    min = parseInt(tParts[1] || '0', 10);
+                    sec = parseInt(tParts[2] || '0', 10);
+                }
+                return new Date(year, month, day, hour, min, sec);
+            } catch (e) {
+                return new Date(0);
+            }
+        }
+
         function getSafeId(str) {
             return str.replace(/[^a-zA-Z0-9ก-ฮ]/g, '_');
         }
@@ -819,6 +847,7 @@
             });
         }
 
+        // --- ปรับปรุงระบบการจัดกลุ่มตาม วัน-เดือน-ปี และเรียงลำดับเวลาที่สมบูรณ์ ---
         function sortAndGroupCards(vId) {
             const cards = Array.from(document.querySelectorAll(`[id^="card-item-${vId}-"]`));
             if (cards.length === 0) return;
@@ -833,24 +862,46 @@
                 const cardId = card.id.replace(`card-item-${vId}-`, '');
                 const plate = getCardPlateValue(vId, cardId);
                 const approveTimeInput = document.getElementById(`input-${vId}-${cardId}-approveTime`)?.value || "";
+                
+                // ดึงเฉพาะ วัน/เดือน/ปี อนุมัติ มาใช้จัดกลุ่ม
                 const approveDateOnly = extractDateOnly(approveTimeInput) || "ไม่ระบุวันที่";
 
+                // คีย์การจัดกลุ่ม: ทะเบียนเดียวกัน และวัน-เดือน-ปี อนุมัติเดียวกัน
                 const groupKey = `${plate} | อนุมัติ: ${approveDateOnly}`;
 
+                const passTimeInput = document.getElementById(`input-${vId}-${cardId}-passTime`)?.value || "";
+                const passDateObj = parseDateTime(passTimeInput);
+
+                // เก็บค่า หลักฐานจากบริษัทฯ เดิมที่มีอยู่ (ถ้ามี)
+                const groupContainer = card.closest('[id^="group-box-"]');
+                let existingEvidence = "";
+                if (groupContainer) {
+                    const evidenceInput = groupContainer.querySelector('input[id^="group-evidence-"]');
+                    if (evidenceInput && evidenceInput.value.trim() !== "") {
+                        existingEvidence = evidenceInput.value.trim();
+                    }
+                }
+
                 if (!groupMap[groupKey]) groupMap[groupKey] = [];
+                if (existingEvidence && !groupMap[groupKey].evidenceVal) {
+                    groupMap[groupKey].evidenceVal = existingEvidence;
+                }
+
                 groupMap[groupKey].push({
                     cardElement: card,
                     cardId: cardId,
-                    passTime: (document.getElementById(`input-${vId}-${cardId}-passTime`)?.value || "").trim()
+                    passTimeStr: passTimeInput.trim(),
+                    passDateObj: passDateObj
                 });
             });
 
+            // เรียงลำดับรายการภายในกลุ่มเดียวกันตาม วัน-เดือน-ปี และ เวลาจริง (น้อยไปมาก)
             Object.keys(groupMap).forEach(groupKey => {
-                groupMap[groupKey].sort((a, b) => a.passTime.localeCompare(b.passTime, 'th', { numeric: true }));
+                groupMap[groupKey].sort((a, b) => a.passDateObj.getTime() - b.passDateObj.getTime());
             });
 
             renderGroups(vId, groupMap);
-            showToast("จัดกลุ่มตามทะเบียนและวันที่อนุมัติเรียบร้อยแล้ว");
+            showToast("จัดกลุ่มตามวัน-เดือน-ปี และเรียงลำดับเวลาสมบูรณ์เรียบร้อยแล้ว");
         }
 
         function addNewCard(vId, showMsg = true) {
